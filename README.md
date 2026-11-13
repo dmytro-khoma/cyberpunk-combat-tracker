@@ -1,5 +1,9 @@
 # Cyberpunk combat tracker
 
+**Live demo:** https://cyberpunk-combat-tracker.onrender.com
+(free hosting: the first visit after a quiet period can take up to a minute,
+and scenes reset when the server restarts)
+
 A web app for the game master: fighters stand on a grid, and the tracker
 rolls the dice and works out everything the rulebook asks you to count by
 hand: range and cover, SP and armour wear, critical injuries, conditions,
