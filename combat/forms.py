@@ -11,8 +11,8 @@ class EncounterForm(forms.ModelForm):
         model = Encounter
         fields = ["name", "width", "height"]
         help_texts = {
-            "width": "Клеток, 6–30. Клетка — 2 м.",
-            "height": "Клеток, 6–30.",
+            "width": "Squares, 6–30. One square is 2 m.",
+            "height": "Squares, 6–30.",
         }
 
 
@@ -28,9 +28,9 @@ class CombatantForm(forms.ModelForm):
             "cover", "x", "y",
         ]
         help_texts = {
-            "magazine": "0 — значение по умолчанию для модели. Книга оставляет магазины ДМ.",
-            "overclock_dv": "Пусто — по умолчанию для модели (у Pozhar 15).",
-            "armor_sp": "Базовый SP — 3.",
+            "magazine": "0 uses the model's default. The rulebook leaves magazines to the GM.",
+            "overclock_dv": "Leave empty for the model's default (Pozhar: 15).",
+            "armor_sp": "Base SP is 3.",
         }
 
     def __init__(self, *args, encounter: Encounter, **kwargs):
@@ -47,21 +47,21 @@ class CombatantForm(forms.ModelForm):
         data = super().clean()
 
         if data.get("role") == Combatant.Role.GUNNER and not data.get("gunner_category"):
-            self.add_error("gunner_category", "Стрелок выбирает категорию оружия.")
+            self.add_error("gunner_category", "A gunner has to pick a weapon category.")
 
         x, y = data.get("x"), data.get("y")
         if x is None or y is None:
             return data
         if x >= self.encounter.width or y >= self.encounter.height:
             raise forms.ValidationError(
-                f"Карта {self.encounter.width} × {self.encounter.height}: столбцы 0–"
-                f"{self.encounter.width - 1}, ряды 0–{self.encounter.height - 1}."
+                f"The map is {self.encounter.width} × {self.encounter.height}: columns 0–"
+                f"{self.encounter.width - 1}, rows 0–{self.encounter.height - 1}."
             )
         if (x, y) in self.encounter.wall_set:
-            raise forms.ValidationError("Эта клетка — стена. Выберите другую или уберите стену на карте.")
+            raise forms.ValidationError("That square is a wall. Pick another one or remove the wall on the map.")
         taken = self.encounter.combatants.filter(x=x, y=y, is_dead=False)
         if self.instance.pk:
             taken = taken.exclude(pk=self.instance.pk)
         if taken.exists():
-            raise forms.ValidationError("На этой клетке уже кто-то стоит.")
+            raise forms.ValidationError("Someone is already standing on that square.")
         return data

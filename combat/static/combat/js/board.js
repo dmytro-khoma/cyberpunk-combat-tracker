@@ -1,6 +1,6 @@
-// Карта боя. Кубики бросает только сервер: отсюда уходит действие
-// ({type, actor, target, ...}), обратно приходит новое состояние сцены.
-// Анимации чисто косметические: их рисуем по разнице старого и нового состояния.
+// Battle map. Only the server rolls dice: this file sends an action
+// ({type, actor, target, ...}) and gets the new scene state back.
+// Animations are cosmetic: they are drawn from the difference between the old and new state.
 
 import { createFx } from './fx.js';
 
@@ -55,7 +55,7 @@ if (root) {
     ui.status.classList.toggle('status--error', error);
   };
 
-  // --- геометрия: та же, что rules.line_cells и rules.path_steps ---------
+  // --- geometry: the same as rules.line_cells and rules.path_steps ------
 
   function wallsBetween(a, b) {
     const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) * 4;
@@ -95,17 +95,17 @@ if (root) {
     return seen;
   }
 
-  // --- что доступно активному бойцу ---------------------------------------
+  // --- what the active fighter can do -----------------------------------
 
   const MODES = [
-    ['fight', 'Атака / шаг', () => true],
-    ['grenade', 'Граната', (c) => Object.values(c.grenades).some((n) => n > 0)],
-    ['hack', 'Квикхак', (c) => c.ramMax > 0],
-    ['lock', 'Захват', (c) => !c.melee && c.weaponKind === 'smart'],
-    ['medkit', 'Аптечка', (c) => c.medkits > 0],
-    ['stabilize', 'Стабилизация', () => true],
-    ['bleed', 'Кровотечение', () => true],
-    ['drain', 'Снять RAM', (c) => c.ramMax > 0],
+    ['fight', 'Attack / move', () => true],
+    ['grenade', 'Grenade', (c) => Object.values(c.grenades).some((n) => n > 0)],
+    ['hack', 'Quickhack', (c) => c.ramMax > 0],
+    ['lock', 'Lock on', (c) => !c.melee && c.weaponKind === 'smart'],
+    ['medkit', 'Medkit', (c) => c.medkits > 0],
+    ['stabilize', 'Stabilise', () => true],
+    ['bleed', 'Stop bleeding', () => true],
+    ['drain', 'Take RAM', (c) => c.ramMax > 0],
   ];
 
   function cellRole(c, x, y, f, reach) {
@@ -113,7 +113,7 @@ if (root) {
     const near = (t) => dist(c, t) <= 1;
     switch (mode) {
       case 'fight': {
-        if (!f) return reach.has(key(x, y)) && !c.statuses.some((s) => s.startsWith('обездвижен')) ? 'reach' : '';
+        if (!f) return reach.has(key(x, y)) && !c.statuses.some((s) => s.startsWith('immobilised')) ? 'reach' : '';
         if (f.side === c.side || c.hasActed || dist(c, f) > c.reachSquares) return '';
         const pierce = !c.melee && c.weaponKind === 'tech' && c.charged ? 1 : 0;
         return wallsBetween(c, f) <= pierce ? 'target' : '';
@@ -137,7 +137,7 @@ if (root) {
     }
   }
 
-  // --- сервер ----------------------------------------------------------------
+  // --- server -------------------------------------------------------------
 
   async function send(type, extra = {}) {
     if (busy) return;
@@ -153,7 +153,7 @@ if (root) {
       });
       const data = await res.json();
       if (!res.ok) {
-        say(data.error ?? 'Сервер ответил ошибкой.', true);
+        say(data.error ?? 'The server returned an error.', true);
         if (type === 'walls') syncWalls();
         return;
       }
@@ -167,7 +167,7 @@ if (root) {
       render(before.log[0]?.id ?? 0);
       fx.play(type, extra, before, state);
     } catch {
-      say('Нет связи с сервером.', true);
+      say('No connection to the server.', true);
     } finally {
       busy = false;
       root.removeAttribute('aria-busy');
@@ -179,7 +179,7 @@ if (root) {
     renderMap();
   }
 
-  // --- отрисовка -----------------------------------------------------------------
+  // --- rendering -------------------------------------------------------------
 
   function render(lastSeen = Infinity) {
     const c = me();
@@ -192,7 +192,7 @@ if (root) {
     renderTurn();
     renderOrder();
     renderLog(lastSeen);
-    ui.round.innerHTML = state.started ? `Раунд <b>${state.round}</b>` : 'Расстановка';
+    ui.round.innerHTML = state.started ? `Round <b>${state.round}</b>` : 'Setup';
   }
 
   function renderMap() {
@@ -213,7 +213,7 @@ if (root) {
 
         if (isWall(x, y)) {
           cell.classList.add('cell--wall');
-          label += ': стена';
+          label += ': wall';
         }
 
         const role = state.started && !wallMode ? cellRole(c, x, y, f && f.condition !== 'dead' ? f : null, reach) : '';
@@ -227,13 +227,13 @@ if (root) {
           const bar = el('span', { className: 'hpbar' });
           bar.style.setProperty('--hp', `${Math.max(0, f.hp / f.hpMax) * 100}%`);
           cell.append(el('span', { className: 'token' }, f.name.slice(0, 2).toUpperCase()), bar);
-          label += `: ${f.name}, ${f.side === 'crew' ? 'команда' : 'противник'}, ${f.hp} из ${f.hpMax} HP`;
-          if (f.condition === 'dead') label += ', мёртв';
-          else if (f.condition !== 'ok') label += ', без сознания';
+          label += `: ${f.name}, ${f.side === 'crew' ? 'crew' : 'hostile'}, ${f.hp} of ${f.hpMax} HP`;
+          if (f.condition === 'dead') label += ', dead';
+          else if (f.condition !== 'ok') label += ', unconscious';
         }
-        if (wallMode) label += isWall(x, y) ? '. Enter — убрать стену' : '. Enter — поставить стену';
-        else if (role === 'reach') label += '. Enter — пойти сюда';
-        else if (role) label += '. Enter — выполнить действие';
+        if (wallMode) label += isWall(x, y) ? '. Press Enter to remove the wall' : '. Press Enter to build a wall';
+        else if (role === 'reach') label += '. Press Enter to move here';
+        else if (role) label += '. Press Enter to act';
         cell.setAttribute('aria-label', label);
         cells.push(cell);
       }
@@ -259,29 +259,29 @@ if (root) {
     }
     if (!c) {
       ui.turn.replaceChildren(el('p', { className: 'muted' },
-        state.started ? '' : 'Расставьте бойцов и стены, потом начните бой. Инициатива — по REF, ничьи решает d6.'));
+        state.started ? '' : 'Place the fighters and walls, then start the fight. Initiative goes by REF; a d6 breaks ties.'));
       return;
     }
 
     const weapon = c.melee ? c.weapon : `${c.weapon} ${c.ammo}/${c.magazine}`;
     const facts = el('dl', { className: 'facts' },
       fact('HP', `${c.hp}/${c.hpMax}`),
-      fact('SP', c.spHead !== c.sp ? `${c.sp} · г${c.spHead}` : `${c.sp}`),
-      fact('Шаг', `${c.moveLeft} м`),
-      fact('Действие', c.hasActed ? 'нет' : 'есть'),
-      fact('Оружие', weapon, true),
-      c.ramMax ? fact('RAM', `${c.ram}/${c.ramMax}`) : fact('Аптечки', `${c.medkits}`),
-      fact('Удача', `${c.luck}`),
+      fact('SP', c.spHead !== c.sp ? `${c.sp} · head ${c.spHead}` : `${c.sp}`),
+      fact('Move', `${c.moveLeft} m`),
+      fact('Action', c.hasActed ? 'used' : 'ready'),
+      fact('Weapon', weapon, true),
+      c.ramMax ? fact('RAM', `${c.ram}/${c.ramMax}`) : fact('Medkits', `${c.medkits}`),
+      fact('Luck', `${c.luck}`),
     );
 
     const flags = c.statuses.map((s) => [s, true]);
-    if (c.jammed) flags.push(['заклинило', true]);
-    if (c.charged) flags.push(['заряжено', false]);
+    if (c.jammed) flags.push(['jammed', true]);
+    if (c.charged) flags.push(['charged', false]);
     if (c.lockTarget) {
       const t = state.combatants.find((p) => p.id === c.lockTarget);
-      flags.push([`захват: ${t?.name ?? '?'}${c.lockReady ? '' : ' (со след. хода)'}`, false]);
+      flags.push([`locked on: ${t?.name ?? '?'}${c.lockReady ? '' : ' (from next turn)'}`, false]);
     }
-    if (c.dodgeUsed) flags.push(['уклонение в раунде потрачено', false]);
+    if (c.dodgeUsed) flags.push(['dodge used this round', false]);
 
     ui.turn.replaceChildren(
       el('div', { className: 'card-head' },
@@ -323,22 +323,22 @@ if (root) {
 
   function renderOpts(c) {
     const parts = [];
-    const luck = Array.from({ length: Math.min(3, c.luck) + 1 }, (_, i) => [i, i ? `+${i}` : 'не тратить']);
+    const luck = Array.from({ length: Math.min(3, c.luck) + 1 }, (_, i) => [i, i ? `+${i}` : 'don\'t spend']);
     if (opt.luck > c.luck) opt.luck = 0;
 
     if (mode === 'fight') {
-      parts.push(select('Куда', 'aim', [['body', 'корпус'], ['head', 'голова (−3)'], ['arm', 'рука (−3)'], ['leg', 'нога (−3)']]));
-      parts.push(select('Удача', 'luck', luck));
-      if (c.overclock && !c.melee) parts.push(checkbox('Разгон: TECH против DV модели, успех — две атаки', 'overclock'));
-      if (c.stealthWeapon) parts.push(checkbox('Удар из скрытности', 'stealth'));
+      parts.push(select('Aim at', 'aim', [['body', 'body'], ['head', 'head (−3)'], ['arm', 'arm (−3)'], ['leg', 'leg (−3)']]));
+      parts.push(select('Luck', 'luck', luck));
+      if (c.overclock && !c.melee) parts.push(checkbox('Overclock: TECH against the model DV, success gives two attacks', 'overclock'));
+      if (c.stealthWeapon) parts.push(checkbox('Strike from stealth', 'stealth'));
     } else if (mode === 'grenade') {
       const have = Object.entries(c.grenades).filter(([, n]) => n > 0);
       if (!have.some(([k]) => k === opt.grenade)) opt.grenade = have[0]?.[0] ?? '';
-      parts.push(select('Граната', 'grenade', have.map(([k, n]) => [k, `${state.grenadeNames[k]} ×${n}`])));
-      parts.push(select('Удача', 'luck', luck));
+      parts.push(select('Grenade', 'grenade', have.map(([k, n]) => [k, `${state.grenadeNames[k]} ×${n}`])));
+      parts.push(select('Luck', 'luck', luck));
     } else if (mode === 'hack') {
-      parts.push(select('Квикхак', 'hack', state.hacks.map((h) => [h.key, `${h.name} · ${h.ram} RAM`])));
-      parts.push(select('Удача', 'luck', luck));
+      parts.push(select('Quickhack', 'hack', state.hacks.map((h) => [h.key, `${h.name} · ${h.ram} RAM`])));
+      parts.push(select('Luck', 'luck', luck));
     }
     ui.opts.replaceChildren(...parts);
     ui.opts.hidden = !parts.length;
@@ -351,17 +351,17 @@ if (root) {
       return b;
     };
     const list = [];
-    if (!c.melee) list.push(btn('Перезарядка', 'reload', 'btn', c.hasActed || c.ammo >= c.magazine));
-    if (c.jammed) list.push(btn('Устранить заклинивание', 'unjam', 'btn btn--red', c.hasActed));
-    if (!c.melee && c.weaponKind === 'tech') list.push(btn('Зарядить', 'charge', 'btn', c.hasActed || c.charged));
-    list.push(btn('Конец хода', 'end_turn', 'btn btn--solid'));
+    if (!c.melee) list.push(btn('Reload', 'reload', 'btn', c.hasActed || c.ammo >= c.magazine));
+    if (c.jammed) list.push(btn('Clear jam', 'unjam', 'btn btn--red', c.hasActed));
+    if (!c.melee && c.weaponKind === 'tech') list.push(btn('Charge', 'charge', 'btn', c.hasActed || c.charged));
+    list.push(btn('End turn', 'end_turn', 'btn btn--solid'));
     ui.buttons.replaceChildren(...list);
   }
 
   function renderOrder() {
     ui.order.replaceChildren(...state.combatants.map((c) => {
-      const cover = el('select', { ariaLabel: `Укрытие ${c.name}` });
-      for (const [v, t] of [['', '—'], ['partial', 'частичное'], ['full', 'полное']]) {
+      const cover = el('select', { ariaLabel: `${c.name}'s cover` });
+      for (const [v, t] of [['', '—'], ['partial', 'partial'], ['full', 'full']]) {
         cover.append(el('option', { value: v, textContent: t, selected: c.cover === v }));
       }
       cover.addEventListener('change', () => send('cover', { target: c.id, cover: cover.value }));
@@ -390,21 +390,21 @@ if (root) {
     }));
   }
 
-  // --- стены ------------------------------------------------------------------------
+  // --- walls ------------------------------------------------------------------
 
   function setWallMode(on) {
     wallMode = on;
     ui.wallToggle.setAttribute('aria-pressed', String(on));
-    ui.wallToggle.textContent = on ? 'Готово' : 'Стены';
+    ui.wallToggle.textContent = on ? 'Done' : 'Walls';
     ui.wallHint.hidden = !on;
     ui.wallClear.hidden = !on;
-    say(on ? 'Режим стен: клик или протяжка мышью ставит стену, по стене — убирает. Ход при этом не тратится.' : '');
+    say(on ? 'Wall mode: click or drag to build walls, drag over a wall to remove it. This does not use the turn.' : '');
     renderMap();
   }
 
   ui.wallToggle.addEventListener('click', () => setWallMode(!wallMode));
   ui.wallClear.addEventListener('click', () => {
-    if (window.confirm('Убрать все стены с карты?')) send('clear_walls');
+    if (window.confirm('Remove all walls from the map?')) send('clear_walls');
   });
 
   let paint = null;   // {build, cells: Set, last: [x, y]}
@@ -413,7 +413,7 @@ if (root) {
     const k = key(x, y);
     const cell = ui.map.querySelector(`[data-x="${x}"][data-y="${y}"]`);
     if (!cell || paint.cells.has(k)) return;
-    if (paint.build && cell.dataset.id) return;     // на бойца стену не ставим
+    if (paint.build && cell.dataset.id) return;     // no wall on top of a fighter
     paint.cells.add(k);
     cell.classList.toggle('cell--wall', paint.build);
   }
@@ -422,7 +422,7 @@ if (root) {
     if (!paint || !cell) return;
     const x = Number(cell.dataset.x);
     const y = Number(cell.dataset.y);
-    // Мышь при быстрой протяжке перескакивает клетки — достраиваем линию.
+    // A fast drag skips squares, so fill in the line between them.
     const [lx, ly] = paint.last ?? [x, y];
     const steps = Math.max(Math.abs(x - lx), Math.abs(y - ly), 1);
     for (let i = 1; i <= steps; i += 1) {
@@ -453,12 +453,12 @@ if (root) {
     if (cells.size) send('walls', { build, cells: [...cells].map((k) => k.split(',').map(Number)) });
   });
 
-  // --- ввод -------------------------------------------------------------------------
+  // --- input ------------------------------------------------------------------
 
   function useCell(x, y) {
     const c = me();
     if (!c) {
-      say(state.started ? 'Бой окончен.' : 'Сначала начните бой. Стены можно ставить кнопкой «Стены».', true);
+      say(state.started ? 'The fight is over.' : 'Start the fight first. You can place walls with the Walls button.', true);
       return;
     }
     const f = at(x, y);
@@ -469,8 +469,8 @@ if (root) {
     }
     if (mode === 'fight') {
       if (!f) send('move', { x, y });
-      else if (f.id === c.id) say('Это сам активный боец.');
-      else if (f.side === c.side) say(`${f.name} — свой. Для помощи выберите «Аптечка» или «Стабилизация».`, true);
+      else if (f.id === c.id) say('That is the active fighter.');
+      else if (f.side === c.side) say(`${f.name} is on your side. To help them, pick Medkit or Stabilise.`, true);
       else {
         send('attack', { target: f.id, aim: opt.aim, luck: Number(opt.luck), overclock: opt.overclock, stealth: opt.stealth });
         opt.overclock = false;
@@ -478,7 +478,7 @@ if (root) {
       return;
     }
     if (!f) {
-      say('Здесь никого нет.', true);
+      say('Nobody is here.', true);
       return;
     }
     const type = { hack: 'hack', lock: 'lock', medkit: 'medkit', stabilize: 'stabilize', bleed: 'stop_bleeding', drain: 'drain' }[mode];
@@ -492,7 +492,7 @@ if (root) {
     const y = Number(cell.dataset.y);
     focusKey = key(x, y);
     if (wallMode) {
-      // Мышь рисует через pointer-события; сюда попадает только Enter с клавиатуры.
+      // The mouse paints through pointer events; only keyboard Enter ends up here.
       if (event.detail === 0) send('walls', { build: !isWall(x, y), cells: [[x, y]] });
       return;
     }
@@ -515,7 +515,7 @@ if (root) {
 
   ui.start.addEventListener('click', () => send('start'));
   ui.reset.addEventListener('click', () => {
-    if (window.confirm('Сбросить бой? HP, патроны и RAM вернутся, половина потерянного SP восстановится, журнал очистится. Стены останутся.')) send('reset');
+    if (window.confirm('Reset the fight? HP, ammo and RAM are restored, half of the lost SP comes back and the log is cleared. Walls stay.')) send('reset');
   });
 
   const first = me();

@@ -1,7 +1,7 @@
 """
-Числа и броски из «Cyberpunk НРИ 1.0». Здесь нет Django и нет состояния боя:
-только таблицы и чистые функции, которые удобно проверять с подставными
-кубиками. Номера разделов в комментариях — как в книге правил.
+Numbers and dice from the "Cyberpunk TTRPG 1.0" rules. No Django and no
+combat state here: only tables and pure functions that are easy to test
+with fixed dice. Section numbers in comments match the rulebook.
 """
 
 from __future__ import annotations
@@ -10,24 +10,24 @@ import math
 import random
 from dataclasses import dataclass, field
 
-SQUARE_M = 2              # одна клетка карты = 2 м
-MOVE_M = 8                # §3: перемещение до 8 м за ход
+SQUARE_M = 2              # one map square = 2 m
+MOVE_M = 8                # §3: move up to 8 m per turn
 BASE_DV = 12
-AIM_PENALTY = 3           # §4: прицельная атака −3
-AIM_PENALTY_OPTICS = 1    # улучшенная оптика: −1 вместо −3
-HIT_BONUS_CAP = 4         # §4: класс + оружие + импланты не выше +4
+AIM_PENALTY = 3           # §4: aimed attack −3
+AIM_PENALTY_OPTICS = 1    # enhanced optics: −1 instead of −3
+HIT_BONUS_CAP = 4         # §4: class + weapon + implants, +4 at most
 PARTIAL_COVER_DV = 2
-DODGE_MIN_REF = 8         # §4: от пули уклоняется только REF ≥ 8
-ARMOR_BASE_SP = 3         # §5: базовый SP; TECH-зарядка его игнорирует
-MEDKIT_LIMIT = 2          # §6: не больше двух аптечек на цель за бой
+DODGE_MIN_REF = 8         # §4: only REF ≥ 8 can dodge bullets
+ARMOR_BASE_SP = 3         # §5: base SP; a TECH charge ignores it
+MEDKIT_LIMIT = 2          # §6: two medkits per target per fight at most
 GRENADE_RANGE_M = 20
 
 
-# --- §4. Дальность ----------------------------------------------------------
+# --- §4. Range -----------------------------------------------------------------
 
 RANGE_EDGES = (6, 12, 25, 50, 100, 200, 400, 800)
 
-# Модификатор к DV для каждого диапазона; None — «—», стрелять нельзя.
+# DV modifier for each band; None means "—", the weapon can't fire that far.
 RANGE_TABLE: dict[str, tuple[int | None, ...]] = {
     "pistol":   (0, 2, 4, 6, 8, 10, None, None),
     "revolver": (2, 0, 2, 4, 6, 8, 10, None),
@@ -39,17 +39,17 @@ RANGE_TABLE: dict[str, tuple[int | None, ...]] = {
 }
 
 CATEGORY_NAMES = {
-    "pistol": "Пистолет",
-    "revolver": "Револьвер",
-    "smg": "ПП",
-    "assault": "Автомат",
-    "rifle": "Винтовка",
-    "shotgun": "Дробовик",
-    "sniper": "Снайперская",
+    "pistol": "Pistol",
+    "revolver": "Revolver",
+    "smg": "SMG",
+    "assault": "Assault rifle",
+    "rifle": "Rifle",
+    "shotgun": "Shotgun",
+    "sniper": "Sniper rifle",
 }
 CATEGORY_CHOICES = list(CATEGORY_NAMES.items())
 
-# §7: автоматическое оружие этих классов тратит патроны на каждый кубик урона.
+# §7: automatic weapons of these classes spend ammo for every damage die.
 AMMO_PER_DIE = {"pistol": 2, "smg": 3, "assault": 2}
 
 
@@ -68,19 +68,19 @@ def max_range_m(category: str) -> int:
     return reach
 
 
-# --- §7–9. Оружие -----------------------------------------------------------
+# --- §7–9. Weapons ---------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Gun:
     name: str
     category: str
-    kind: str              # "power" (обычное), "smart" или "tech"
+    kind: str              # "power" (regular), "smart" or "tech"
     auto: bool
-    dice: int              # число d6
+    dice: int              # number of d6
     overclock: bool
-    magazine: int          # значение по умолчанию; ДМ меняет в карточке бойца
+    magazine: int          # default; the GM can change it on the fighter sheet
     overclock_dv: int | None = None
-    arrow: bool = False    # «Вентиль Стрелы»: зарядка обязательна + взрыв
+    arrow: bool = False    # Arrow Valve: must be charged, then explodes
 
     is_melee = False
 
@@ -96,10 +96,10 @@ class Gun:
 class Blade:
     name: str
     dice: int
-    sp_divisor: int = 2       # §5: половина SP, моно-катана — четверть
+    sp_divisor: int = 2       # §5: half SP, a mono-katana uses a quarter
     ignore_sp: int = 0
     hit_bonus: int = 0
-    reach_m: int = SQUARE_M   # соседняя клетка
+    reach_m: int = SQUARE_M   # the next square
     min_body: int = 0
     note: str = ""
 
@@ -111,8 +111,8 @@ class Blade:
     magazine = 0
 
 
-# Магазины и DV разгона в книге не заданы (п. 18) — ниже только стартовые
-# значения, их меняют в карточке бойца перед боем.
+# The book leaves magazines and overclock DVs to the GM (§18), so these are
+# only starting values; change them on the fighter sheet before a fight.
 GUNS: dict[str, Gun] = {
     "unity":      Gun("Unity", "pistol", "power", False, 3, False, 12),
     "nue":        Gun("Nue", "pistol", "power", False, 4, False, 8),
@@ -136,38 +136,38 @@ GUNS: dict[str, Gun] = {
     "nekomata":   Gun("Nekomata", "sniper", "tech", False, 5, False, 5),
     "ashura":     Gun("Ashura", "sniper", "smart", False, 5, False, 5),
     "grad":       Gun("Grad", "sniper", "power", False, 6, False, 5),
-    "arrow":      Gun("Вентиль Стрелы", "rifle", "tech", False, 8, False, 2, arrow=True),
+    "arrow":      Gun("Arrow Valve", "rifle", "tech", False, 8, False, 2, arrow=True),
 }
 
 BLADES: dict[str, Blade] = {
-    "knife":        Blade("Нож", 3),
-    "tanto":        Blade("Танто", 2, note="из скрытности +2d6"),
-    "club":         Blade("Дубинка", 3, note="крит. травма оглушает"),
-    "machete":      Blade("Мачете", 3, note="+1d6 по цели без SP"),
-    "katana":       Blade("Катана", 4, hit_bonus=1),
-    "mono_katana":  Blade("Моно-катана", 4, sp_divisor=4),
-    "sledge":       Blade("Кувалда", 5, ignore_sp=2, min_body=6),
-    "axe":          Blade("Боевой топор", 4, note="пробитие снимает 3 SP"),
-    "satori":       Blade("Сатори", 4, note="крит. травма +2d6"),
-    "byakko":       Blade("Бякко", 4, note="после убийства +4 м"),
-    "jinchu":       Blade("Дзинтю-Мару", 4, note="+2 по элите и боссу"),
-    "cocktail":     Blade("Коктейльная палочка", 3, note="первый удар из скрытности +2d6"),
-    "sting":        Blade("Жало", 3, reach_m=6, note="метание, кровотечение при пробитии"),
-    "monowire":     Blade("Моноструна", 3, ignore_sp=2, reach_m=3),
-    "mantis":       Blade("Клинки богомола", 4, note="после 6 м движения +2"),
-    "gorilla":      Blade("Руки гориллы", 4),
+    "knife":        Blade("Knife", 3),
+    "tanto":        Blade("Tanto", 2, note="+2d6 from stealth"),
+    "club":         Blade("Club", 3, note="critical injury stuns"),
+    "machete":      Blade("Machete", 3, note="+1d6 against a target without SP"),
+    "katana":       Blade("Katana", 4, hit_bonus=1),
+    "mono_katana":  Blade("Mono-katana", 4, sp_divisor=4),
+    "sledge":       Blade("Sledgehammer", 5, ignore_sp=2, min_body=6),
+    "axe":          Blade("Battle axe", 4, note="a hit through armour removes 3 SP"),
+    "satori":       Blade("Satori", 4, note="critical injury +2d6"),
+    "byakko":       Blade("Byakko", 4, note="+4 m after a kill"),
+    "jinchu":       Blade("Jinchu-Maru", 4, note="+2 against elites and bosses"),
+    "cocktail":     Blade("Cocktail stick", 3, note="first strike from stealth +2d6"),
+    "sting":        Blade("Sting", 3, reach_m=6, note="thrown, bleeding on a hit through armour"),
+    "monowire":     Blade("Monowire", 3, ignore_sp=2, reach_m=3),
+    "mantis":       Blade("Mantis blades", 4, note="+2 after moving 6 m"),
+    "gorilla":      Blade("Gorilla arms", 4),
 }
 
 WEAPONS: dict[str, Gun | Blade] = {**GUNS, **BLADES}
 
 WEAPON_CHOICES = [
-    ("Огнестрельное", [(k, f"{g.name} · {CATEGORY_NAMES[g.category].lower()}, {g.dice}d6")
-                       for k, g in GUNS.items()]),
-    ("Ближний бой", [(k, f"{b.name} · {b.dice}d6") for k, b in BLADES.items()]),
+    ("Firearms", [(k, f"{g.name} · {CATEGORY_NAMES[g.category].lower()}, {g.dice}d6")
+                  for k, g in GUNS.items()]),
+    ("Melee", [(k, f"{b.name} · {b.dice}d6") for k, b in BLADES.items()]),
 ]
 
 
-# --- §10. Гранаты -------------------------------------------------------------
+# --- §10. Grenades -----------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Grenade:
@@ -177,18 +177,18 @@ class Grenade:
 
 
 GRENADES = {
-    "frag":  Grenade("Осколочная", 4, 3),
-    "emp":   Grenade("ЭМИ", 2, 3),
-    "flash": Grenade("Светошумовая", 0, 4),
-    "fire":  Grenade("Зажигательная", 3, 3),
+    "frag":  Grenade("Frag", 4, 3),
+    "emp":   Grenade("EMP", 2, 3),
+    "flash": Grenade("Flashbang", 0, 4),
+    "fire":  Grenade("Incendiary", 3, 3),
 }
 
 
-# --- §11. Кибердеки и квикхаки --------------------------------------------------
+# --- §11. Cyberdecks and quickhacks ---------------------------------------------
 
 DECKS = {
-    "":         ("Нет", 0),
-    "basic":    ("Базовая", 5),
+    "":         ("None", 0),
+    "basic":    ("Basic", 5),
     "arasaka":  ("Arasaka", 6),
     "militech": ("Militech", 7),
     "raven":    ("Raven Microcyber", 8),
@@ -198,18 +198,18 @@ DECK_CHOICES = [(k, name if not ram else f"{name} · {ram} RAM") for k, (name, r
 
 QUICKHACKS = {
     "ping":      ("Ping", 1),
-    "glitch":    ("Сбой оружия", 2),
-    "optics":    ("Перезагрузка оптики", 2),
-    "cripple":   ("Ограничение движения", 3),
-    "short":     ("Короткое замыкание", 3),
-    "overheat":  ("Перегрев", 4),
+    "glitch":    ("Weapon glitch", 2),
+    "optics":    ("Reboot optics", 2),
+    "cripple":   ("Cripple movement", 3),
+    "short":     ("Short circuit", 3),
+    "overheat":  ("Overheat", 4),
 }
 DAMAGE_HACKS = {"short", "overheat"}
 
 HACK_DV = {"regular": 12, "elite": 14, "boss": 16}
 
 
-# --- §1. Проверки -------------------------------------------------------------
+# --- §1. Checks --------------------------------------------------------------------
 
 @dataclass
 class Check:
@@ -233,7 +233,7 @@ class Check:
 
 
 def roll_check(stat: int, mods: int, rng: random.Random) -> Check:
-    """Натуральная 10 добавляет ещё d10, натуральная 1 вычитает. Без цепочек."""
+    """A natural 10 adds another d10, a natural 1 subtracts one. No chains."""
     first = rng.randint(1, 10)
     check = Check(stat, mods, [first], first)
     if first in (1, 10):
@@ -247,7 +247,7 @@ def roll_d6(count: int, rng: random.Random) -> list[int]:
     return [rng.randint(1, 6) for _ in range(count)]
 
 
-# --- §5. HP и SP ----------------------------------------------------------------
+# --- §5. HP and SP -----------------------------------------------------------------
 
 def max_hp(body: int, cool: int) -> int:
     return 10 + 5 * math.ceil((body + cool) / 2)
@@ -258,7 +258,7 @@ def chrome_limit(cool: int) -> int:
 
 
 def melee_sp(sp: int, divisor: int, ignore: int) -> int:
-    """Ближний бой: доля SP с округлением вверх, потом «игнорирует N»."""
+    """Melee: a share of SP rounded up, then "ignores N SP"."""
     return max(0, math.ceil(sp / divisor) - ignore)
 
 
@@ -266,7 +266,7 @@ def is_critical(dice: list[int], hp_loss: int) -> bool:
     return dice.count(6) >= 2 and hp_loss >= 1
 
 
-# §6: d6 по таблице критических травм.
+# §6: d6 on the critical injury table.
 def critical_kind(roll: int) -> str:
     if roll <= 2:
         return "concussion"
@@ -278,23 +278,23 @@ def critical_kind(roll: int) -> str:
 
 
 CRITICAL_NAMES = {
-    "concussion": "сотрясение (−2 ко всем проверкам на 1 ход)",
-    "arm": "травма руки (рукой пользоваться нельзя до лечения)",
-    "leg": "травма ноги (скорость вдвое до лечения)",
-    "bleeding": "кровотечение (−2 HP в начале своего хода)",
+    "concussion": "concussion (−2 to all checks for 1 turn)",
+    "arm": "arm injury (the arm can't be used until treated)",
+    "leg": "leg injury (half speed until treated)",
+    "bleeding": "bleeding (−2 HP at the start of own turn)",
 }
 
 
 def distance(ax: int, ay: int, bx: int, by: int) -> int:
-    """Клетки по сетке, диагональ считается за одну."""
+    """Grid squares; a diagonal step counts as one."""
     return max(abs(ax - bx), abs(ay - by))
 
 
-# --- Стены ----------------------------------------------------------------
-# Ту же логику повторяет board.js, чтобы подсветка совпадала с сервером.
+# --- Walls -------------------------------------------------------------------------
+# board.js repeats this logic so the highlighted targets match the server.
 
 def line_cells(ax: int, ay: int, bx: int, by: int) -> list[tuple[int, int]]:
-    """Клетки, через которые идёт линия между центрами, без концов."""
+    """Squares the line between the two centres passes through, ends excluded."""
     steps = max(abs(bx - ax), abs(by - ay)) * 4
     cells: list[tuple[int, int]] = []
     for i in range(1, steps):
@@ -314,8 +314,9 @@ NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy]
 
 def path_steps(width: int, height: int, walls: set, start: tuple, goal: tuple, limit: int) -> int | None:
     """
-    Кратчайший путь в клетках в обход стен (BFS, диагональ — один шаг,
-    срезать угол между двумя стенами нельзя). None — не дойти за limit шагов.
+    Shortest path in squares around walls (BFS, a diagonal is one step, and
+    you can't cut a corner between two walls). None if it takes more than
+    `limit` steps.
     """
     if goal in walls:
         return None

@@ -1,5 +1,5 @@
-// Эффекты поверх карты: трассеры, удары, взрывы, взлом, всплывающий урон.
-// Ничего не решают — только показывают то, что уже посчитал сервер.
+// Effects on top of the map: tracers, strikes, blasts, hacks, floating damage.
+// They decide nothing; they only show what the server has already worked out.
 
 const NS = 'http://www.w3.org/2000/svg';
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
@@ -182,7 +182,7 @@ export function createFx(map, svg) {
     );
   }
 
-  // Что произошло — по новым строкам журнала и разнице HP.
+  // What happened is read from the new log lines and the HP difference.
   async function play(type, extra, before, after) {
     if (calm.matches) return;
     const prev = new Map(before.combatants.map((c) => [c.id, c]));
@@ -197,16 +197,16 @@ export function createFx(map, svg) {
       const a = center(actor);
       const b = center(target);
       if (a && b) {
-        let swings = fresh.filter((e) => e.text.startsWith(`${actor.name} →`) && /— (попадание|промах)\.$/.test(e.text));
-        if (!swings.length) swings = [{ text: 'промах.' }];
+        let swings = fresh.filter((e) => e.text.startsWith(`${actor.name} →`) && /, (hit|miss)\.$/.test(e.text));
+        if (!swings.length) swings = [{ text: 'miss.' }];
         for (const swing of swings) {
-          const hit = swing.text.endsWith('попадание.');
+          const hit = swing.text.endsWith('hit.');
           if (actor.melee && target && Math.max(Math.abs(actor.x - target.x), Math.abs(actor.y - target.y)) <= 1) await slash(b, hit);
           else await tracer(a, b, hit);
-          if (!hit) label(b, 'МИМО', 'fx-text fx-text--miss');
+          if (!hit) label(b, 'MISS', 'fx-text fx-text--miss');
           await wait(140);
         }
-        if (has(`${target.name} уклоняется`)) label(b, 'УКЛОН', 'fx-text fx-text--miss', 150);
+        if (has(`${target.name} dodges`)) label(b, 'DODGE', 'fx-text fx-text--miss', 150);
       }
     }
 
@@ -224,10 +224,10 @@ export function createFx(map, svg) {
     if (type === 'hack' && actor) {
       const a = center(actor);
       const b = center(prev.get(extra.target));
-      if (a && b) await hackLine(a, b, has(`${actor.name}: «`, 'успех'));
+      if (a && b) await hackLine(a, b, has(`${actor.name}: `, ', success.'));
     }
 
-    // Урон, лечение, падения.
+    // Damage, healing, knock-downs.
     for (const now of after.combatants) {
       const was = prev.get(now.id);
       if (!was) continue;
@@ -239,11 +239,11 @@ export function createFx(map, svg) {
         shake(now.id);
       } else if (diff > 0) {
         label(p, `+${diff}`, 'fx-text fx-text--heal');
-      } else if (type === 'attack' && now.id === extra.target && fresh.some((e) => e.kind === 'hit' && e.text.startsWith('Урон'))) {
+      } else if (type === 'attack' && now.id === extra.target && fresh.some((e) => e.kind === 'hit' && e.text.startsWith('Damage'))) {
         label(p, '0', 'fx-text fx-text--miss');
       }
       if (was.condition === 'ok' && now.condition !== 'ok') {
-        label(p, now.condition === 'dead' ? 'УБИТ' : 'НА ЗЕМЛЕ', 'fx-text fx-text--down', 350);
+        label(p, now.condition === 'dead' ? 'KILLED' : 'DOWN', 'fx-text fx-text--down', 350);
       }
     }
   }

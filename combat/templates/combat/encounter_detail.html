@@ -1,7 +1,7 @@
 {% extends "combat/base.html" %}
 {% load static %}
 
-{% block title %}{{ encounter.name }} · Трекер боя{% endblock %}
+{% block title %}{{ encounter.name }} · Combat tracker{% endblock %}
 
 {% block head %}
     <meta name="csrf-token" content="{{ csrf_token }}">
@@ -11,21 +11,21 @@
 {% block content %}
 <div class="title-row">
     <h1>{{ encounter.name }}</h1>
-    <p class="round" data-round>{% if encounter.started %}Раунд <b>{{ encounter.round }}</b>{% else %}Расстановка{% endif %}</p>
+    <p class="round" data-round>{% if encounter.started %}Round <b>{{ encounter.round }}</b>{% else %}Setup{% endif %}</p>
 </div>
 
 {% if not encounter.started %}
     <section class="sheet" aria-labelledby="setup-title">
-        <h2 id="setup-title"><span class="num">01</span>Бойцы</h2>
+        <h2 id="setup-title"><span class="num">01</span>Fighters</h2>
         {% if state.combatants %}
             <div class="table-scroll">
             <table class="table">
                 <thead>
                     <tr>
-                        <th scope="col">Имя</th><th scope="col">Сторона</th><th scope="col">Класс</th>
+                        <th scope="col">Name</th><th scope="col">Side</th><th scope="col">Class</th>
                         <th scope="col" class="n">REF</th><th scope="col" class="n">HP</th><th scope="col" class="n">SP</th>
-                        <th scope="col">Оружие</th><th scope="col">Клетка</th>
-                        <th scope="col"><span class="visually-hidden">Действия</span></th>
+                        <th scope="col">Weapon</th><th scope="col">Square</th>
+                        <th scope="col"><span class="visually-hidden">Actions</span></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -40,10 +40,10 @@
                             <td>{{ c.get_weapon.name }}</td>
                             <td>{{ c.x }}, {{ c.y }}{% if c.cover %} · {{ c.get_cover_display|lower }}{% endif %}</td>
                             <td class="table__actions">
-                                <a href="{% url 'combat:combatant_edit' encounter.pk c.pk %}">Правка<span class="visually-hidden"> {{ c.name }}</span></a>
+                                <a href="{% url 'combat:combatant_edit' encounter.pk c.pk %}">Edit<span class="visually-hidden"> {{ c.name }}</span></a>
                                 <form method="post" action="{% url 'combat:combatant_delete' encounter.pk c.pk %}">
                                     {% csrf_token %}
-                                    <button class="text-button" type="submit">Убрать<span class="visually-hidden"> {{ c.name }}</span></button>
+                                    <button class="text-button" type="submit">Remove<span class="visually-hidden"> {{ c.name }}</span></button>
                                 </form>
                             </td>
                         </tr>
@@ -52,69 +52,69 @@
             </table>
             </div>
         {% else %}
-            <p class="muted">Бойцов пока нет.</p>
+            <p class="muted">No fighters yet.</p>
         {% endif %}
         <div class="row" style="margin-top: 0.8rem">
-            <a class="btn" href="{% url 'combat:combatant_add' encounter.pk %}">Добавить бойца</a>
+            <a class="btn" href="{% url 'combat:combatant_add' encounter.pk %}">Add a fighter</a>
         </div>
     </section>
 {% endif %}
 
 <div class="battle" data-board data-action-url="{% url 'combat:action' encounter.pk %}">
     <section aria-labelledby="map-title">
-        <h2 id="map-title"><span class="num">02</span>Карта <span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">клетка 2 м</span></h2>
-        <noscript><p class="message message--error">Карте нужен JavaScript.</p></noscript>
+        <h2 id="map-title"><span class="num">02</span>Map <span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">square = 2 m</span></h2>
+        <noscript><p class="message message--error">The map needs JavaScript.</p></noscript>
         <div class="map-tools">
-            <button class="btn btn--small" type="button" aria-pressed="false" data-wall-toggle>Стены</button>
-            <span class="small muted" data-wall-hint hidden>Клик или протяжка — поставить, по стене — убрать.</span>
-            <button class="text-button small" type="button" data-wall-clear hidden>Убрать все стены</button>
+            <button class="btn btn--small" type="button" aria-pressed="false" data-wall-toggle>Walls</button>
+            <span class="small muted" data-wall-hint hidden>Click or drag to build, drag over a wall to remove it.</span>
+            <button class="text-button small" type="button" data-wall-clear hidden>Remove all walls</button>
         </div>
         <div class="map-scroll">
             <div class="map-wrap">
-                <div class="map" role="group" aria-label="Карта {{ encounter.width }} на {{ encounter.height }} клеток" data-map></div>
+                <div class="map" role="group" aria-label="Map, {{ encounter.width }} by {{ encounter.height }} squares" data-map></div>
                 <svg class="fx" aria-hidden="true" data-fx></svg>
             </div>
         </div>
         <p class="legend">
-            <span><i class="k-crew"></i>команда</span>
-            <span><i class="k-host"></i>противники</span>
-            <span><i class="k-active"></i>чей ход</span>
-            <span><i class="k-reach"></i>куда можно дойти</span>
-            <span><i class="k-wall"></i>стена</span>
-            <span>уголки — цель для действия</span>
-            <span>треугольник/квадрат в углу — частичное/полное укрытие</span>
+            <span><i class="k-crew"></i>crew</span>
+            <span><i class="k-host"></i>hostiles</span>
+            <span><i class="k-active"></i>whose turn</span>
+            <span><i class="k-reach"></i>can move here</span>
+            <span><i class="k-wall"></i>wall</span>
+            <span>corner marks: valid target</span>
+            <span>triangle / square in the corner: partial / full cover</span>
         </p>
-        <p class="legend">Стены не пускают пройти и закрывают линию огня, от взрыва защищают как полное укрытие. Заряженный TECH пробивает одну стену. Стрелки двигают фокус по карте, Enter — действие.</p>
+        <p class="legend">Walls block movement and line of fire, and protect from blasts like full cover. A charged TECH shot goes through one wall. Arrow keys move the focus on the map, Enter acts.</p>
     </section>
 
     <aside class="battle__side">
         <section class="sheet" aria-labelledby="turn-title">
-            <h2 id="turn-title"><span class="num">03</span>Ход</h2>
+            <h2 id="turn-title"><span class="num">03</span>Turn</h2>
             <div data-turn></div>
             <div data-controls hidden>
-                <div class="modes" role="radiogroup" aria-label="Что делает клик по карте" data-modes></div>
+                <div class="modes" role="radiogroup" aria-label="What a click on the map does" data-modes></div>
                 <div class="opts" data-opts></div>
                 <div class="row" data-buttons></div>
             </div>
             <p class="status" role="status" aria-live="polite" data-status></p>
             <div class="row">
-                <button class="btn btn--solid" type="button" data-do="start">Начать бой</button>
-                <button class="btn btn--red" type="button" data-do="reset">Сбросить бой</button>
+                <button class="btn btn--solid" type="button" data-do="start">Start fight</button>
+                <button class="btn btn--red" type="button" data-do="reset">Reset fight</button>
             </div>
         </section>
 
         <section class="sheet" aria-labelledby="order-title">
-            <h2 id="order-title"><span class="num">04</span>Инициатива</h2>
+            <h2 id="order-title"><span class="num">04</span>Initiative</h2>
             <div class="table-scroll">
                 <table class="table order-table">
-                    <thead><tr><th scope="col">Боец</th><th scope="col" class="n">REF</th><th scope="col" class="n">HP</th><th scope="col" class="n">SP</th><th scope="col">Укрытие</th></tr></thead>
+                    <thead><tr><th scope="col">Fighter</th><th scope="col" class="n">REF</th><th scope="col" class="n">HP</th><th scope="col" class="n">SP</th><th scope="col">Cover</th></tr></thead>
                     <tbody data-order></tbody>
                 </table>
             </div>
         </section>
 
         <section class="sheet" aria-labelledby="log-title">
-            <h2 id="log-title"><span class="num">05</span>Журнал</h2>
+            <h2 id="log-title"><span class="num">05</span>Log</h2>
             <ol class="log" data-log></ol>
         </section>
     </aside>
@@ -122,7 +122,7 @@
 
 <form method="post" action="{% url 'combat:encounter_delete' encounter.pk %}" class="danger">
     {% csrf_token %}
-    <button class="text-button" type="submit">Удалить сцену</button>
+    <button class="text-button" type="submit">Delete scene</button>
 </form>
 
 {{ state|json_script:"initial-state" }}

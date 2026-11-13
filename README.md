@@ -1,91 +1,99 @@
-# Трекер боя для Cyberpunk НРИ 1.0
+# Cyberpunk combat tracker
 
-Веб-приложение для ведущего: бойцы стоят на сетке, а трекер бросает кубики
-и считает всё, что в книге правил считается руками — дистанцию и укрытия,
-SP и его износ, крит. травмы, состояния, гранаты, квикхаки и проверки смерти.
-Все броски пишутся в журнал.
+A web app for the game master: fighters stand on a grid, and the tracker
+rolls the dice and works out everything the rulebook asks you to count by
+hand: range and cover, SP and armour wear, critical injuries, conditions,
+grenades, quickhacks and death checks. Every roll goes into the log.
 
-Django + обычный JavaScript, без сборки.
+Django and plain JavaScript, no build step.
 
-## Запуск
+## Run it
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
-python manage.py seed_demo      # готовая сцена «Склад в Уотсоне»
+python manage.py seed_demo      # a ready-made scene, "Watson warehouse"
 python manage.py runserver
 ```
 
-Тесты: `python manage.py test combat`.
+Tests: `python manage.py test combat`.
 
-## Что считается по правилам
+## What the rules cover
 
-Номера — разделы книги.
+Numbers are rulebook sections.
 
-- **§1 Проверки.** Характеристика + d10 ≥ DV, равенство — успех. Натуральная 10
-  добавляет d10, натуральная 1 вычитает. Навыков нет. LUCK: запас тратится по
-  1–3 очка на +1, восстанавливается при правке бойца (новая сессия), а не при сбросе боя.
-- **§2 Классы.** Стрелок: +2 из выбранной категории и переброс одного промаха за ход.
-  Хладнокровный убийца: +1d6 к первому удару по каждой цели, +4 м после убийства (1/раунд).
-  Нетраннер: +2 RAM с декой, первый квикхак в ход дешевле на 1.
-- **§3 Ход.** Инициатива по REF (с рефлексами), ничьи — d6 с перебросом.
-  Одно действие и 8 м движения, движение можно делить до и после действия.
-- **§4 Попадание.** REF + d10 против 12 + дальность + укрытие (частичное +2,
-  полное блокирует выстрел). Бонусы класса, оружия и имплантов — не выше +4.
-  Уклонение — одна попытка за раунд: от пуль только при REF 8+, от ближнего боя любой.
-- **§5 Урон.** Кубики − SP, при пробитии броня теряет 1 SP. Ближний бой — половина SP
-  (моно-катана — четверть), потом «игнорирует N». Хедшот ×2 после SP, рука — роняет,
-  нога — скорость вдвое. Заряженный TECH-хедшот ослепляет или убивает (кроме боссов).
-- **§6 Травмы.** Две шестёрки + пробитие → d6 по таблице. При 0 HP — без сознания
-  и BODY + d10 против 12 в начале своего хода; аптечка 2d6, не больше двух на цель за бой.
-  Стабилизация и остановка кровотечения — TECH против 12. После боя возвращается
-  половина потерянного SP.
-- **§7–9 Оружие.** Все модели из таблицы, расход патронов на кубик у автоматического
-  оружия, разгон (две атаки или заклинивание), Smart-захват, TECH-зарядка,
-  холодное и культовое оружие со своими свойствами, «Вентиль Стрелы» с взрывом.
-- **§10 Гранаты.** До 20 м, промах уводит на ≈3 м, без уклонения и без крит. травм,
-  полное укрытие защищает.
-- **§11 Нетраннинг.** Кибердеки и обычные квикхаки: RAM тратится даже при провале,
-  DV 12/14/16, сбор RAM с тела.
+- **§1 Checks.** Stat + d10 ≥ DV, a tie succeeds. A natural 10 adds a d10, a
+  natural 1 subtracts one. There are no skills. LUCK: 1–3 points spent for
+  +1 each; the pool refills when the fighter is edited (a new session), not
+  when the fight is reset.
+- **§2 Classes.** Gunner: +2 with the chosen category and one reroll of a
+  miss per turn. Cold-blooded killer: +1d6 on the first strike against each
+  target, +4 m after a kill (once per round). Netrunner: +2 RAM with a deck,
+  the first quickhack each turn costs 1 less.
+- **§3 Turns.** Initiative by REF (with boosted reflexes), ties broken with a
+  d6 and rerolled. One action and 8 m of movement; movement can be split
+  before and after the action.
+- **§4 Hitting.** REF + d10 against 12 + range + cover (partial +2, full
+  blocks the shot). Class, weapon and implant bonuses add up to +4 at most.
+  Dodging: one attempt per round, against bullets only with REF 8+, against
+  melee for anyone.
+- **§5 Damage.** Dice − SP; a hit through armour removes 1 SP. Melee uses half
+  SP (a mono-katana a quarter), then "ignores N". Headshots ×2 after SP, an arm
+  hit drops the item, a leg hit halves speed. A charged TECH headshot blinds or
+  kills (except bosses).
+- **§6 Injuries.** Two sixes + getting through armour → d6 on the table. At
+  0 HP: unconscious and BODY + d10 against 12 at the start of own turn; a
+  medkit heals 2d6, two per target per fight at most. Stabilising and stopping
+  bleeding: TECH against 12. After the fight half of the lost SP comes back.
+- **§7–9 Weapons.** Every model from the tables, ammo per die for automatic
+  weapons, overclocking (two attacks or a jam), Smart lock-on, TECH charge,
+  melee and iconic weapons with their own properties, the Arrow Valve with
+  its blast.
+- **§10 Grenades.** Up to 20 m, a miss drifts ≈3 m, no dodging and no
+  critical injuries, full cover protects.
+- **§11 Netrunning.** Cyberdecks and regular quickhacks: RAM is spent even on
+  a failure, DV 12/14/16, taking RAM from a body.
 
-## Карта и стены
+## Map and walls
 
-Кнопка «Стены» над картой включает редактор: клик или протяжка мышью ставит
-стену, протяжка по стене убирает. Работает и во время боя, ход не тратит.
-Стены не пускают пройти (путь ищется в обход, срезать угол между двумя стенами
-нельзя), закрывают линию огня и ближний удар, а от взрыва защищают как полное
-укрытие (§10). Заряженный TECH-выстрел пробивает одну стену (§8). Линия огня —
-отрезок между центрами клеток; одна и та же функция в `rules.py` и `board.js`,
-поэтому подсветка целей совпадает с тем, что разрешит сервер.
+The Walls button above the map turns on the editor: click or drag to build a
+wall, drag over a wall to remove it. It works during a fight too and costs no
+turn. Walls block movement (paths go around them, and you can't cut a corner
+between two walls), block line of fire and melee, and protect from blasts
+like full cover (§10). A charged TECH shot goes through one wall (§8). Line
+of fire is a segment between square centres; the same function lives in
+`rules.py` and `board.js`, so the highlighted targets match what the server
+allows.
 
-Выстрелы, удары, гранаты, квикхаки, урон и лечение анимируются (`fx.js`).
-При включённом в системе «уменьшении движения» анимации отключаются.
+Shots, strikes, grenades, quickhacks, damage and healing are animated
+(`fx.js`). With "reduce motion" turned on in the system, animations are off.
 
-## Что оставлено ведущему
+## Left to the GM
 
-Как и в п. 18 книги: магазины и DV разгона большинства моделей (в карточке
-бойца есть стартовые значения, их надо поправить), направление промаха гранаты
-(трекер бросает d8), параметры врагов. Укрытие ведущий меняет прямо в таблице
-инициативы в любой момент.
+As in §18 of the book: magazines and overclock DVs for most models (the
+fighter sheet has starting values to adjust), the direction a missed grenade
+drifts (the tracker rolls a d8), and enemy stats. The GM can change cover at
+any time right in the initiative table.
 
-Пока не сделано: демоны и легендарные демоны (§12), глубокий взлом и TRACE (§13),
-активные импланты — Сандевистан, Берсерк, хром и киберпсихоз (§14), турели как
-отдельный тип. Повреждения от квикхаков не дают крит. травм — книга этого прямо не
-говорит, решение трекера.
+Not done yet: demons and legendary demons (§12), deep hacking and TRACE
+(§13), active implants such as Sandevistan and Berserk, chrome and
+cyberpsychosis (§14), and turrets as a separate type. Damage from quickhacks
+doesn't cause critical injuries; the book doesn't say so directly, so this is
+the tracker's call.
 
-## Устройство
+## Structure
 
 ```
 combat/
-  rules.py      таблицы и броски, без Django
-  services.py   ход боя: проверки, состояния, журнал
+  rules.py      tables and dice, no Django
+  services.py   combat flow: checks, conditions, log
   models.py     Encounter, Combatant, LogEntry
-  views.py      страницы и один JSON-эндпоинт для действий
-  static/combat/js/board.js   карта и лист хода
-  tests.py      в том числе пример из §16
+  views.py      pages and one JSON endpoint for actions
+  static/combat/js/board.js   map and turn sheet
+  tests.py      including the §16 example
 ```
 
-Браузер кубики не бросает: он отправляет действие, сервер проверяет его и
-возвращает новое состояние.
+The browser never rolls dice: it sends an action, the server checks it and
+returns the new state.

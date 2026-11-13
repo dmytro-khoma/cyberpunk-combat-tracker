@@ -1,7 +1,7 @@
 """
-Ход боя: проверки «можно ли», изменение моделей и запись в журнал.
-Вьюхи вызывают только функции отсюда. Любое нарушение правил —
-CombatError с текстом для игрока.
+Combat flow: "is this allowed" checks, model changes and log entries.
+Views call only the functions in this module. Any rules violation raises
+CombatError with a message for the player.
 """
 
 from __future__ import annotations
@@ -22,28 +22,28 @@ class CombatError(Exception):
 
 
 STATUS_NAMES = {
-    "blind": "ослеплён",
-    "concussion": "сотрясение",
-    "stunned": "оглушён",
-    "immobile": "обездвижен",
-    "glitch": "сбой оружия",
-    "implants_off": "импланты отключены",
-    "slowed": "скорость вдвое",
-    "burning": "горит",
-    "overheat": "перегрев",
-    "bleeding": "кровотечение",
-    "arm": "травма руки",
-    "leg": "травма ноги",
-    "minus2": "−2 к следующей проверке",
+    "blind": "blinded",
+    "concussion": "concussion",
+    "stunned": "stunned",
+    "immobile": "immobilised",
+    "glitch": "weapon glitch",
+    "implants_off": "implants off",
+    "slowed": "half speed",
+    "burning": "burning",
+    "overheat": "overheating",
+    "bleeding": "bleeding",
+    "arm": "arm injury",
+    "leg": "leg injury",
+    "minus2": "−2 to next check",
 }
 
-# Персистентные состояния живут до лечения; разовые срабатывают в начале хода.
+# Persistent conditions last until treated; the others trigger at turn start.
 PERSISTENT = {"bleeding", "arm", "leg"}
 ON_TURN_START = {"burning", "overheat", "stunned"}
 UNTIL_NEXT_CHECK = {"minus2"}
 
 
-# --- мелочи ---------------------------------------------------------------
+# --- helpers ----------------------------------------------------------------------
 
 def _log(encounter: Encounter, text: str, kind: str = Kind.INFO) -> None:
     LogEntry.objects.create(encounter=encounter, round=encounter.round, kind=kind, text=text)
@@ -54,7 +54,7 @@ def _metres(a: Combatant, b: Combatant) -> int:
 
 
 def _add_status(c: Combatant, name: str, turns: int | None = 1, **extra) -> bool:
-    """Повторное наложение обновляет длительность, но не складывается."""
+    """Applying the same condition again refreshes it but does not stack."""
     fresh = name not in c.statuses
     c.statuses[name] = {"left": turns, "seen": False, **extra}
     return fresh
@@ -69,50 +69,50 @@ def winner(encounter: Encounter) -> str | None:
     return "nobody" if not standing else None
 
 
-WINNER_TEXT = {"crew": "Победила команда.", "hostile": "Победили противники.",
-               "nobody": "На ногах не осталось никого."}
+WINNER_TEXT = {"crew": "The crew wins.", "hostile": "The hostiles win.",
+               "nobody": "Nobody is left standing."}
 
 
 def _require_turn(encounter: Encounter, c: Combatant, *, action: bool = False) -> None:
     if not encounter.started:
-        raise CombatError("Сначала начните бой.")
+        raise CombatError("Start the fight first.")
     if winner(encounter):
-        raise CombatError("Бой окончен.")
+        raise CombatError("The fight is over.")
     active = encounter.active_combatant()
     if active is None or active.pk != c.pk:
-        raise CombatError(f"Сейчас не ход {c.name}.")
+        raise CombatError(f"It is not {c.name}'s turn.")
     if not c.conscious:
-        raise CombatError(f"{c.name} без сознания.")
+        raise CombatError(f"{c.name} is unconscious.")
     if action and c.has_acted:
-        raise CombatError(f"{c.name} уже потратил действие в этом ходу.")
+        raise CombatError(f"{c.name} has already used the action this turn.")
 
 
 def _check_mods(c: Combatant, *, attack: bool) -> tuple[int, list[str]]:
-    """Штрафы состояний к проверке. «−2 к следующей» снимается здесь же."""
+    """Condition penalties for a check. "−2 to next check" is used up here."""
     mods, notes = 0, []
     if "blind" in c.statuses:
         mods -= 4 if attack else 2
-        notes.append("ослеплён")
+        notes.append("blinded")
     if "concussion" in c.statuses:
         mods -= 2
-        notes.append("сотрясение")
+        notes.append("concussion")
     if c.statuses.pop("minus2", None) is not None:
         mods -= 2
-        notes.append("−2 от травмы")
+        notes.append("−2 from injury")
     return mods, notes
 
 
 def _spend_luck(c: Combatant, luck: int) -> int:
     if not 0 <= luck <= 3:
-        raise CombatError("Удачу тратят по 1–3 очка на проверку.")
+        raise CombatError("Luck is spent 1–3 points per check.")
     if luck > c.luck_left:
-        raise CombatError(f"У {c.name} осталось {c.luck_left} очк. удачи.")
+        raise CombatError(f"{c.name} has only {c.luck_left} luck left.")
     c.luck_left -= luck
     return luck
 
 
 def _hit_bonus(a: Combatant, t: Combatant, weapon) -> int:
-    """§4: класс + оружие + импланты, всё вместе не выше +4."""
+    """§4: class + weapon + implants, +4 at most in total."""
     bonus = 0
     if (a.role == Combatant.Role.GUNNER and not weapon.is_melee
             and a.gunner_category == weapon.category):
@@ -132,14 +132,14 @@ def _aim_penalty(a: Combatant, t: Combatant, weapon, aim: str) -> int:
     if aim == "body":
         return 0
     if (weapon.kind == "smart" and a.lock_target_id == t.pk and a.lock_ready):
-        return 0                                     # §8: захват снимает −3
+        return 0                                     # §8: a lock removes the −3
     if a.optics and a.implants_on:
         return rules.AIM_PENALTY_OPTICS
     return rules.AIM_PENALTY
 
 
 def _dodged(encounter, t: Combatant, attack_total: int, rng: random.Random, *, bullet: bool) -> bool:
-    """§4: одна попытка за раунд, общая для пуль и ближнего боя; ничья — защитнику."""
+    """§4: one attempt per round, shared by bullets and melee; ties go to the defender."""
     if t.dodge_used or not t.conscious:
         return False
     if bullet and t.effective_ref < rules.DODGE_MIN_REF:
@@ -148,45 +148,45 @@ def _dodged(encounter, t: Combatant, attack_total: int, rng: random.Random, *, b
     mods, _ = _check_mods(t, attack=False)
     roll = rules.roll_check(t.dex, mods, rng)
     if roll.total >= attack_total:
-        _log(encounter, f"{t.name} уклоняется: DEX {roll.describe()} ≥ {attack_total}.", Kind.MISS)
+        _log(encounter, f"{t.name} dodges: DEX {roll.describe()} ≥ {attack_total}.", Kind.MISS)
         return True
-    _log(encounter, f"{t.name} пытается уклониться: DEX {roll.describe()} — не успел.")
+    _log(encounter, f"{t.name} tries to dodge: DEX {roll.describe()}, too slow.")
     return False
 
 
-# --- урон --------------------------------------------------------------------
+# --- damage ---------------------------------------------------------------------------
 
 def _apply_critical(c: Combatant, kind: str, lines: list[str]) -> None:
     if c.is_boss and kind == "arm":
         _add_status(c, "minus2", None)
-        lines.append(f"Крит. травма: {c.name} — босс, вместо травмы руки −2 к следующей проверке.")
+        lines.append(f"Critical injury: {c.name} is a boss, so instead of an arm injury −2 to the next check.")
         return
     turns = 1 if kind == "concussion" else None
     fresh = _add_status(c, kind, turns)
-    tail = "" if fresh else " Такая травма уже есть, не складывается."
-    lines.append(f"Крит. травма: {rules.CRITICAL_NAMES[kind]}.{tail}")
+    tail = "" if fresh else " Already has this injury, it does not stack."
+    lines.append(f"Critical injury: {rules.CRITICAL_NAMES[kind]}.{tail}")
 
 
 def _stun(c: Combatant, lines: list[str]) -> None:
     if c.is_boss:
         _add_status(c, "minus2", None)
-        lines.append(f"{c.name} не теряет действие (босс): −2 к следующей проверке.")
+        lines.append(f"{c.name} keeps the action (boss): −2 to the next check.")
     else:
         _add_status(c, "stunned", None)
-        lines.append(f"{c.name} оглушён и пропустит следующее действие.")
+        lines.append(f"{c.name} is stunned and will lose the next action.")
 
 
 def _knock_down(encounter: Encounter, c: Combatant, was_up: bool) -> bool:
     if was_up and c.hp <= 0 and not c.is_dead:
-        _log(encounter, f"{c.name} падает без сознания (0 HP).", Kind.DOWN)
+        _log(encounter, f"{c.name} falls unconscious (0 HP).", Kind.DOWN)
         return True
     return False
 
 
 def _strike(encounter, a, t, rng, *, dice, weapon, aim="body", charged=False, bonus_dice=0):
     """
-    §5–6. Бросок урона одной атаки: SP, пробитие, хедшот, крит. травма.
-    Возвращает (строки журнала, потеря HP).
+    §5–6. Damage roll for one attack: SP, armour wear, headshot, critical injury.
+    Returns the HP lost.
     """
     lines: list[str] = []
     rolled = rules.roll_d6(dice + bonus_dice, rng)
@@ -196,48 +196,48 @@ def _strike(encounter, a, t, rng, *, dice, weapon, aim="body", charged=False, bo
     if charged:
         ignored = min(rules.ARMOR_BASE_SP, t.armor_sp)
         sp -= ignored
-        sp_note.append(f"зарядка −{ignored}")
+        sp_note.append(f"charge −{ignored}")
     if weapon.is_melee:
         sp = rules.melee_sp(sp, weapon.sp_divisor, weapon.ignore_sp)
         sp_note.append("¼ SP" if weapon.sp_divisor == 4 else "½ SP")
         if weapon.ignore_sp:
-            sp_note.append(f"игнор {weapon.ignore_sp}")
+            sp_note.append(f"ignores {weapon.ignore_sp}")
 
     raw = sum(rolled)
     loss = max(0, raw - sp)
     crit = rules.is_critical(rolled, loss)
     note = f" ({', '.join(sp_note)})" if sp_note else ""
-    text = f"Урон {len(rolled)}d6{rolled} = {raw} − SP {sp}{note} → {loss}"
+    text = f"Damage {len(rolled)}d6{rolled} = {raw} − SP {sp}{note} → {loss}"
     base = loss
 
     if crit and a.weapon == "satori":
         extra = rules.roll_d6(2, rng)
         loss += sum(extra)
-        text += f", Сатори +2d6{extra}"
+        text += f", Satori +2d6{extra}"
     if aim == "head" and loss:
         loss *= 2
-        text += ", ×2 в голову"
+        text += ", ×2 to the head"
     lines.append(text + (f" = {loss} HP." if loss != base else " HP."))
 
     if loss >= 1 and t.armor_sp > 0:
         drop = 3 if a.weapon == "axe" else 1
         t.armor_sp = max(0, t.armor_sp - drop)
-        lines.append(f"SP брони цели −{drop}, осталось {t.armor_sp}.")
+        lines.append(f"Target armour −{drop} SP, {t.armor_sp} left.")
 
     was_up = t.hp > 0
     t.hp = max(0, t.hp - loss)
 
     if loss >= 1:
         if aim == "arm":
-            lines.append(f"{t.name} роняет то, что держал в руке.")
+            lines.append(f"{t.name} drops whatever was in that hand.")
         elif aim == "leg":
             _add_status(t, "slowed", 1)
-            lines.append(f"{t.name}: скорость вдвое на следующий ход.")
+            lines.append(f"{t.name}: half speed next turn.")
         if charged and aim == "head":
             _tech_headshot(t, weapon, lines)
         if a.weapon == "sting":
             _add_status(t, "bleeding", None)
-            lines.append(f"Жало: у {t.name} кровотечение.")
+            lines.append(f"Sting: {t.name} is bleeding.")
 
     if crit:
         kind = rules.critical_kind(rng.randint(1, 6))
@@ -251,24 +251,24 @@ def _strike(encounter, a, t, rng, *, dice, weapon, aim="body", charged=False, bo
 
 
 def _tech_headshot(t: Combatant, gun, lines: list[str]) -> None:
-    """§5: заряженный TECH-выстрел в голову с пробитием."""
+    """§5: a charged TECH shot to the head that gets through armour."""
     lethal = gun.category in ("shotgun", "sniper")
     if lethal and not t.is_boss:
         t.hp, t.is_dead = 0, True
-        lines.append(f"Заряженный выстрел в голову: {t.name} убит на месте.")
+        lines.append(f"Charged headshot: {t.name} is killed outright.")
         return
     if gun.category in ("pistol", "smg", "assault") or lethal:
         if t.skull and t.implants_on:
-            lines.append("Бронированный череп защищает от ослепления.")
+            lines.append("The armoured skull prevents blinding.")
         else:
             _add_status(t, "blind", 1)
-            lines.append(f"{t.name} ослеплён на 1 ход.")
+            lines.append(f"{t.name} is blinded for 1 turn.")
 
 
-# --- инициатива и ходы ----------------------------------------------------------
+# --- initiative and turns ---------------------------------------------------------
 
 def _break_ties(group: list[Combatant], rng: random.Random) -> list[tuple[Combatant, int]]:
-    """§3: при равном REF — d6, ничьи перебрасываются."""
+    """§3: equal REF rolls a d6, ties are rerolled."""
     rolls = {c.pk: rng.randint(1, 6) for c in group}
     ordered = []
     for value in sorted(set(rolls.values()), reverse=True):
@@ -281,7 +281,7 @@ def _break_ties(group: list[Combatant], rng: random.Random) -> list[tuple[Combat
 def start(encounter: Encounter, rng: random.Random) -> None:
     everyone = list(encounter.combatants.all())
     if {c.side for c in everyone if c.conscious} != {Combatant.Side.CREW, Combatant.Side.HOSTILE}:
-        raise CombatError("Нужен хотя бы один боец в команде и один противник.")
+        raise CombatError("You need at least one crew member and one hostile.")
 
     by_ref: dict[int, list[Combatant]] = {}
     for c in everyone:
@@ -301,12 +301,12 @@ def start(encounter: Encounter, rng: random.Random) -> None:
     encounter.round = 1
     encounter.turn_index = 0
     encounter.save()
-    _log(encounter, "Инициатива по REF: " + ", ".join(parts) + ".")
+    _log(encounter, "Initiative by REF: " + ", ".join(parts) + ".")
     _begin_turn(encounter, rng)
 
 
 def _end_of_turn(c: Combatant) -> None:
-    """Состояния считаются в ходах персонажа: «1 ход» — до конца следующего его хода."""
+    """Conditions count the character's own turns: "1 turn" lasts until the end of their next turn."""
     for name, data in list(c.statuses.items()):
         if data.get("left") is not None and data.get("seen"):
             data["left"] -= 1
@@ -319,7 +319,7 @@ def _begin_turn(encounter: Encounter, rng: random.Random) -> None:
 
     for _ in range(len(order) * 3):
         if (side := winner(encounter)):
-            _log(encounter, f"Бой окончен. {WINNER_TEXT[side]}", Kind.DOWN)
+            _log(encounter, f"The fight is over. {WINNER_TEXT[side]}", Kind.DOWN)
             return
 
         c = Combatant.objects.get(pk=order[encounter.turn_index].pk)
@@ -349,9 +349,9 @@ def _begin_turn(encounter: Encounter, rng: random.Random) -> None:
             c.memory.pop(key, None)
         c.save()
 
-        line = f"Раунд {encounter.round}. Ходит {c.name}."
+        line = f"Round {encounter.round}. {c.name}'s turn."
         if c.has_acted:
-            line += " Оглушение: основного действия в этот ход нет."
+            line += " Stunned: no main action this turn."
         _log(encounter, line)
         return
 
@@ -361,26 +361,26 @@ def _turn_start_damage(encounter: Encounter, c: Combatant, rng: random.Random) -
     lines = []
     if "bleeding" in c.statuses:
         c.hp = max(0, c.hp - 2)
-        lines.append("кровотечение −2 HP")
-    for name, label in (("burning", "горение"), ("overheat", "перегрев")):
+        lines.append("bleeding −2 HP")
+    for name, label in (("burning", "burning"), ("overheat", "overheat")):
         data = c.statuses.pop(name, None)
         if data:
             rolled = rules.roll_d6(data.get("dice", 1), rng)
             c.hp = max(0, c.hp - sum(rolled))
             lines.append(f"{label} {len(rolled)}d6{rolled} −{sum(rolled)} HP")
     if lines:
-        _log(encounter, f"{c.name}: " + ", ".join(lines) + f". Осталось {c.hp} HP.", Kind.HIT)
+        _log(encounter, f"{c.name}: " + ", ".join(lines) + f". {c.hp} HP left.", Kind.HIT)
         _knock_down(encounter, c, was_up)
 
 
 def _death_check(encounter: Encounter, c: Combatant, rng: random.Random) -> None:
-    """§6: BODY + d10 против DV 12 в начале своего хода; первый провал — смерть."""
+    """§6: BODY + d10 against DV 12 at the start of own turn; the first failure is death."""
     roll = rules.roll_check(c.body, 0, rng)
     if roll.total >= rules.BASE_DV:
-        _log(encounter, f"{c.name} держится: BODY {roll.describe()} ≥ 12.")
+        _log(encounter, f"{c.name} holds on: BODY {roll.describe()} ≥ 12.")
     else:
         c.is_dead = True
-        _log(encounter, f"{c.name} умирает: BODY {roll.describe()} < 12.", Kind.DOWN)
+        _log(encounter, f"{c.name} dies: BODY {roll.describe()} < 12.", Kind.DOWN)
 
 
 def _advance(encounter: Encounter) -> None:
@@ -401,54 +401,54 @@ def end_turn(encounter: Encounter, c: Combatant, rng: random.Random) -> None:
     _begin_turn(encounter, rng)
 
 
-# --- движение -------------------------------------------------------------------
+# --- movement --------------------------------------------------------------------------
 
 @transaction.atomic
 def move(encounter: Encounter, c: Combatant, x: int, y: int) -> None:
     _require_turn(encounter, c)
     if not (0 <= x < encounter.width and 0 <= y < encounter.height):
-        raise CombatError("Клетка за пределами карты.")
+        raise CombatError("That square is outside the map.")
     if (x, y) == (c.x, c.y):
-        raise CombatError("Выберите другую клетку.")
+        raise CombatError("Pick a different square.")
     if "immobile" in c.statuses:
-        raise CombatError(f"{c.name} обездвижен.")
+        raise CombatError(f"{c.name} is immobilised.")
     if (x, y) in encounter.wall_set:
-        raise CombatError("Там стена.")
+        raise CombatError("There is a wall there.")
     if encounter.combatants.filter(x=x, y=y, is_dead=False).exists():
-        raise CombatError("Клетка занята.")
+        raise CombatError("That square is taken.")
     budget = c.move_left // rules.SQUARE_M
     steps = rules.path_steps(encounter.width, encounter.height, encounter.wall_set,
                              (c.x, c.y), (x, y), budget)
     if steps is None:
         straight = rules.distance(c.x, c.y, x, y) * rules.SQUARE_M
         if straight > c.move_left:
-            raise CombatError(f"Далеко: до клетки {straight} м, у {c.name} осталось {c.move_left} м.")
-        raise CombatError(f"Не дойти: в обход стен дальше, чем {c.move_left} м.")
+            raise CombatError(f"Too far: the square is {straight} m away, {c.name} has {c.move_left} m left.")
+        raise CombatError(f"Can't get there: the way around the walls is longer than {c.move_left} m.")
     cost = steps * rules.SQUARE_M
 
     c.x, c.y = x, y
     c.move_left -= cost
     c.moved_m += cost
     c.save()
-    _log(encounter, f"{c.name} проходит {cost} м (осталось {c.move_left} м).")
+    _log(encounter, f"{c.name} moves {cost} m ({c.move_left} m left).")
 
 
-# --- атаки ------------------------------------------------------------------------
+# --- attacks ----------------------------------------------------------------------------
 
-AIMS = {"body": "", "head": " в голову", "arm": " в руку", "leg": " в ногу"}
+AIMS = {"body": "", "head": " (head)", "arm": " (arm)", "leg": " (leg)"}
 
 
 @transaction.atomic
 def attack(encounter, a, t, rng, *, aim="body", luck=0, overclock=False, stealth=False):
     _require_turn(encounter, a, action=True)
     if aim not in AIMS:
-        raise CombatError("Неизвестная часть тела.")
+        raise CombatError("Unknown body part.")
     if t.pk == a.pk:
-        raise CombatError("Выберите другую цель.")
+        raise CombatError("Pick another target.")
     if t.is_dead:
-        raise CombatError(f"{t.name} уже мёртв.")
+        raise CombatError(f"{t.name} is already dead.")
     if "glitch" in a.statuses:
-        raise CombatError(f"У {a.name} сбой оружия до конца следующего хода.")
+        raise CombatError(f"{a.name}'s weapon is glitched until the end of their next turn.")
 
     weapon = a.get_weapon()
     if weapon.is_melee:
@@ -460,54 +460,54 @@ def attack(encounter, a, t, rng, *, aim="body", luck=0, overclock=False, stealth
     a.save()
     t.save()
     if (side := winner(encounter)):
-        _log(encounter, f"Бой окончен. {WINNER_TEXT[side]}", Kind.DOWN)
+        _log(encounter, f"The fight is over. {WINNER_TEXT[side]}", Kind.DOWN)
 
 
 def _shoot(encounter, a, t, gun, rng, *, aim, luck, overclock):
     if a.jammed:
-        raise CombatError("Оружие заклинило. Устранение — 1 действие.")
+        raise CombatError("The weapon is jammed. Clearing it takes 1 action.")
     if gun.arrow and not a.charged:
-        raise CombatError("«Вентиль Стрелы» стреляет только после зарядки.")
+        raise CombatError("The Arrow Valve fires only after charging.")
 
     metres = _metres(a, t)
     mod = rules.range_mod(gun.category, metres)
     if mod is None:
-        raise CombatError(f"{metres} м — слишком далеко: {rules.CATEGORY_NAMES[gun.category].lower()} не достаёт.")
+        raise CombatError(f"{metres} m is too far for a {rules.CATEGORY_NAMES[gun.category].lower()}.")
 
     charged = gun.kind == "tech" and a.charged
     walls = rules.walls_between(encounter.wall_set, a.x, a.y, t.x, t.y)
     if walls > (1 if charged else 0):
-        raise CombatError("Стена на линии огня." + ("" if gun.kind != "tech" else
-                          " Заряженный TECH пробивает только одну стену."))
+        raise CombatError("A wall blocks the line of fire." + ("" if gun.kind != "tech" else
+                          " A charged TECH shot goes through one wall only."))
     if walls:
-        _log(encounter, "Заряженный выстрел идёт сквозь стену.")
+        _log(encounter, "The charged shot goes through the wall.")
     cover = 0
     if t.cover == Combatant.Cover.FULL and not charged:
-        raise CombatError(f"{t.name} в полном укрытии: прямой выстрел невозможен.")
+        raise CombatError(f"{t.name} is in full cover: no direct shot.")
     if t.cover == Combatant.Cover.PARTIAL and not charged:
         cover = rules.PARTIAL_COVER_DV
     dv = rules.BASE_DV + mod + cover
 
     per_die = gun.ammo_per_die
     if per_die and a.ammo < per_die:
-        raise CombatError(f"Нужно минимум {per_die} патр. на кубик, в магазине {a.ammo}. Перезарядитесь.")
+        raise CombatError(f"Needs at least {per_die} rounds per die, the magazine has {a.ammo}. Reload.")
     if not per_die and a.ammo < 1:
-        raise CombatError("Магазин пуст. Перезарядитесь.")
+        raise CombatError("The magazine is empty. Reload.")
 
     attacks, jam = 1, False
     if overclock:
         if not gun.overclock:
-            raise CombatError(f"{gun.name} не умеет разгон.")
+            raise CombatError(f"{gun.name} can't be overclocked.")
         oc_dv = a.overclock_dv or gun.overclock_dv
         mods, _ = _check_mods(a, attack=False)
         roll = rules.roll_check(a.tech, mods, rng)
         if roll.total >= oc_dv:
             attacks = 2
-            _log(encounter, f"{a.name}: разгон удался, TECH {roll.describe()} ≥ {oc_dv}. Две атаки.")
+            _log(encounter, f"{a.name}: overclock works, TECH {roll.describe()} ≥ {oc_dv}. Two attacks.")
         else:
             jam = True
-            _log(encounter, f"{a.name}: разгон сорвался, TECH {roll.describe()} < {oc_dv}. "
-                            "Одна атака, потом заклинивание.", Kind.MISS)
+            _log(encounter, f"{a.name}: overclock fails, TECH {roll.describe()} < {oc_dv}. "
+                            "One attack, then the weapon jams.", Kind.MISS)
 
     bonus = _hit_bonus(a, t, gun)
     aim_pen = _aim_penalty(a, t, gun, aim)
@@ -519,26 +519,26 @@ def _shoot(encounter, a, t, gun, rng, *, aim, luck, overclock):
             break
         dice = min(gun.dice, a.ammo // per_die) if per_die else gun.dice
         if dice < 1:
-            _log(encounter, "На вторую атаку патронов не хватило.")
+            _log(encounter, "Not enough ammo for the second attack.")
             break
         a.ammo -= gun.ammo_for(dice)
 
         mods = bonus - aim_pen + state_mods + (luck if number == 0 else 0)
         roll = rules.roll_check(a.effective_ref, mods, rng)
-        head = f"{a.name} → {t.name}{AIMS[aim]}, {gun.name} ({metres} м, DV {dv})"
+        head = f"{a.name} → {t.name}{AIMS[aim]}, {gun.name} ({metres} m, DV {dv})"
         if notes:
             head += f" [{', '.join(notes)}]"
 
         if roll.total < dv and a.role == Combatant.Role.GUNNER and not a.memory.get("reroll"):
             a.memory["reroll"] = True
-            _log(encounter, f"{head}: REF {roll.describe()} — промах, Стрелок перебрасывает.", Kind.MISS)
+            _log(encounter, f"{head}: REF {roll.describe()}, miss. The gunner rerolls.", Kind.MISS)
             roll = rules.roll_check(a.effective_ref, mods, rng)
 
         if roll.total < dv:
-            _log(encounter, f"{head}: REF {roll.describe()} — промах.", Kind.MISS)
+            _log(encounter, f"{head}: REF {roll.describe()}, miss.", Kind.MISS)
             continue
 
-        _log(encounter, f"{head}: REF {roll.describe()} — попадание.", Kind.HIT)
+        _log(encounter, f"{head}: REF {roll.describe()}, hit.", Kind.HIT)
         if _dodged(encounter, t, roll.total, rng, bullet=True):
             continue
 
@@ -553,21 +553,21 @@ def _shoot(encounter, a, t, gun, rng, *, aim, luck, overclock):
 
 
 def _arrow_blast(encounter, a, t, rng):
-    """§9: взрыв 3d6 радиусом 2 м, SP считается отдельно и полностью."""
+    """§9: a 3d6 blast with a 2 m radius; SP counts separately and in full."""
     for victim in _in_radius(encounter, a, t.x, t.y, 1, also=t):
         if victim.is_dead:
             continue
-        _explosion(encounter, victim, rng, "Взрыв «Вентиля Стрелы»", dice=3)
+        _explosion(encounter, victim, rng, "Arrow Valve blast", dice=3)
         if victim not in (a, t):
             victim.save()
 
 
 def _melee(encounter, a, t, blade, rng, *, aim, luck, stealth):
     if _metres(a, t) > max(blade.reach_m, rules.SQUARE_M):
-        reach = "до соседней клетки" if blade.reach_m < 4 else f"на {blade.reach_m} м"
-        raise CombatError(f"{blade.name} достаёт только {reach}.")
+        reach = "the next square" if blade.reach_m < 4 else f"{blade.reach_m} m"
+        raise CombatError(f"{blade.name} only reaches {reach}.")
     if rules.walls_between(encounter.wall_set, a.x, a.y, t.x, t.y):
-        raise CombatError("Между вами стена.")
+        raise CombatError("There is a wall between you.")
 
     mods = _hit_bonus(a, t, blade) - _aim_penalty(a, t, blade, aim)
     if blade.min_body and a.body < blade.min_body:
@@ -581,9 +581,9 @@ def _melee(encounter, a, t, blade, rng, *, aim, luck, stealth):
     if notes:
         head += f" [{', '.join(notes)}]"
     if roll.total < rules.BASE_DV:
-        _log(encounter, f"{head}: DEX {roll.describe()} — промах.", Kind.MISS)
+        _log(encounter, f"{head}: DEX {roll.describe()}, miss.", Kind.MISS)
         return
-    _log(encounter, f"{head}: DEX {roll.describe()} — попадание.", Kind.HIT)
+    _log(encounter, f"{head}: DEX {roll.describe()}, hit.", Kind.HIT)
 
     if _dodged(encounter, t, roll.total, rng, bullet=False):
         return
@@ -591,22 +591,22 @@ def _melee(encounter, a, t, blade, rng, *, aim, luck, stealth):
     bonus, why = 0, []
     if stealth and a.weapon == "tanto":
         bonus += 2
-        why.append("танто из скрытности +2d6")
+        why.append("tanto from stealth +2d6")
     if stealth and a.weapon == "cocktail" and not a.memory.get("cocktail"):
         a.memory["cocktail"] = True
         bonus += 2
-        why.append("палочка из скрытности +2d6")
+        why.append("cocktail stick from stealth +2d6")
     if a.weapon == "machete" and t.armor_sp + t.implant_sp == 0:
         bonus += 1
-        why.append("мачете по цели без SP +1d6")
+        why.append("machete against no SP +1d6")
     hit_before = a.memory.setdefault("hit", [])
     if t.pk not in hit_before:
         hit_before.append(t.pk)
         if a.role == Combatant.Role.ASSASSIN:
             bonus += 1
-            why.append("первый удар убийцы по цели +1d6")
+            why.append("killer's first strike on this target +1d6")
     if why:
-        _log(encounter, "Бонус: " + ", ".join(why) + ".")
+        _log(encounter, "Bonus: " + ", ".join(why) + ".")
 
     was_up = t.hp > 0
     loss = _strike(encounter, a, t, rng, dice=blade.dice, weapon=blade, aim=aim, bonus_dice=bonus)
@@ -626,13 +626,13 @@ def _kill_bonus(encounter: Encounter, a: Combatant) -> None:
         extra += 4
     if extra:
         a.move_left += extra
-        _log(encounter, f"{a.name} получает +{extra} м свободного движения после убийства.")
+        _log(encounter, f"{a.name} gets +{extra} m of free movement after the kill.")
 
 
-# --- гранаты -----------------------------------------------------------------------
+# --- grenades -------------------------------------------------------------------------------
 
 DIRECTIONS = [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)]
-DIRECTION_NAMES = ["север", "северо-восток", "восток", "юго-восток", "юг", "юго-запад", "запад", "северо-запад"]
+DIRECTION_NAMES = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]
 
 
 def _in_radius(encounter, actor, x, y, squares, also=None):
@@ -649,28 +649,28 @@ def _in_radius(encounter, actor, x, y, squares, also=None):
 
 
 def _shielded(c: Combatant) -> bool:
-    """§10: полное укрытие (в том числе стена) между центром взрыва и целью."""
+    """§10: full cover (a wall counts too) between the blast centre and the target."""
     return c.cover == Combatant.Cover.FULL or getattr(c, "behind_wall", False)
 
 
 def _explosion(encounter, c, rng, label, *, dice, ignore_armor=False, sp_note=""):
-    """Взрывы: без уклонения и без крит. травм (§10). Полное укрытие спасает."""
+    """Blasts: no dodging and no critical injuries (§10). Full cover protects."""
     if _shielded(c):
-        _log(encounter, f"{label}: {c.name} за укрытием, не задет.")
+        _log(encounter, f"{label}: {c.name} is behind cover, not hit.")
         return None
     return _flat_damage(encounter, c, rng, label, dice=dice, ignore_armor=ignore_armor,
                         sp_note=sp_note)
 
 
 def _flat_damage(encounter, c, rng, label, *, dice, ignore_armor=False, sp_note=""):
-    """Урон без попадания по части тела и без крит. травм: взрывы и квикхаки."""
+    """Damage with no body part and no critical injuries: blasts and quickhacks."""
     rolled = rules.roll_d6(dice, rng)
     sp = c.implant_sp if ignore_armor else c.armor_sp + c.implant_sp
     loss = max(0, sum(rolled) - sp)
-    text = f"{label}: {c.name} — {dice}d6{rolled} = {sum(rolled)} − SP {sp}{sp_note} → {loss} HP."
+    text = f"{label}: {c.name}, {dice}d6{rolled} = {sum(rolled)} − SP {sp}{sp_note} → {loss} HP."
     if loss and not ignore_armor and c.armor_sp:
         c.armor_sp -= 1
-        text += f" SP брони −1, осталось {c.armor_sp}."
+        text += f" Armour −1 SP, {c.armor_sp} left."
     was_up = c.hp > 0
     c.hp = max(0, c.hp - loss)
     _log(encounter, text, Kind.HIT if loss else Kind.INFO)
@@ -682,17 +682,17 @@ def _flat_damage(encounter, c, rng, label, *, dice, ignore_armor=False, sp_note=
 def throw_grenade(encounter, a, x, y, kind, rng, *, luck=0):
     _require_turn(encounter, a, action=True)
     if kind not in rules.GRENADES:
-        raise CombatError("Неизвестная граната.")
+        raise CombatError("Unknown grenade.")
     grenade = rules.GRENADES[kind]
     if getattr(a, kind) < 1:
-        raise CombatError(f"У {a.name} нет гранат «{grenade.name}».")
+        raise CombatError(f"{a.name} has no {grenade.name.lower()} grenades.")
     if not (0 <= x < encounter.width and 0 <= y < encounter.height):
-        raise CombatError("Клетка за пределами карты.")
+        raise CombatError("That square is outside the map.")
     metres = rules.distance(a.x, a.y, x, y) * rules.SQUARE_M
     if metres > rules.GRENADE_RANGE_M:
-        raise CombatError(f"Граната летит до 20 м, а тут {metres} м.")
+        raise CombatError(f"A grenade flies up to 20 m, this is {metres} m.")
     if (x, y) in encounter.wall_set:
-        raise CombatError("Это клетка стены — целься рядом.")
+        raise CombatError("That square is a wall. Aim next to it.")
 
     mods = _spend_luck(a, luck)
     state_mods, _ = _check_mods(a, attack=True)
@@ -701,76 +701,78 @@ def throw_grenade(encounter, a, x, y, kind, rng, *, luck=0):
     a.has_acted = True
 
     if roll.total >= rules.BASE_DV:
-        _log(encounter, f"{a.name} бросает «{grenade.name}» на {metres} м: DEX {roll.describe()} — точно.")
+        _log(encounter, f"{a.name} throws a {grenade.name.lower()} grenade {metres} m: DEX {roll.describe()}, on target.")
     else:
         d = rng.randint(0, 7)
         x = min(max(x + DIRECTIONS[d][0], 0), encounter.width - 1)
         y = min(max(y + DIRECTIONS[d][1], 0), encounter.height - 1)
-        _log(encounter, f"{a.name} бросает «{grenade.name}»: DEX {roll.describe()} — мимо, "
-                        f"граната уходит на ≈3 м, {DIRECTION_NAMES[d]} (d8: {d + 1}).", Kind.MISS)
+        _log(encounter, f"{a.name} throws a {grenade.name.lower()} grenade: DEX {roll.describe()}, off target. "
+                        f"It lands ≈3 m to the {DIRECTION_NAMES[d]} (d8: {d + 1}).", Kind.MISS)
 
     radius = grenade.radius_m // rules.SQUARE_M
     encounter.fx = {"blast": [x, y, radius, kind]}
     victims = _in_radius(encounter, a, x, y, radius)
     if not victims:
-        _log(encounter, "В радиусе взрыва никого.")
+        _log(encounter, "Nobody in the blast radius.")
 
     for c in victims:
         if _shielded(c):
-            _log(encounter, f"{grenade.name}: {c.name} за укрытием, не задет.")
+            _log(encounter, f"{grenade.name}: {c.name} is behind cover, not hit.")
         elif kind == "frag":
-            _flat_damage(encounter, c, rng, "Осколочная", dice=4)
+            _flat_damage(encounter, c, rng, "Frag", dice=4)
         elif kind == "fire":
-            _flat_damage(encounter, c, rng, "Зажигательная", dice=3)
+            _flat_damage(encounter, c, rng, "Incendiary", dice=3)
             _add_status(c, "burning", None, dice=1)
         elif kind == "emp" and not c.cyberized:
-            _log(encounter, f"ЭМИ: у {c.name} нет имплантов, эффекта нет.")
+            _log(encounter, f"EMP: {c.name} has no implants, no effect.")
         elif kind == "emp":
-            _flat_damage(encounter, c, rng, "ЭМИ", dice=2, ignore_armor=True,
-                         sp_note=" (обычная броня не считается)")
+            _flat_damage(encounter, c, rng, "EMP", dice=2, ignore_armor=True,
+                         sp_note=" (regular armour doesn't count)")
             _add_status(c, "implants_off", 1)
         elif kind == "flash":
             _add_status(c, "blind", 1)
-            _log(encounter, f"Светошумовая: {c.name} ослеплён на 1 ход.")
+            _log(encounter, f"Flashbang: {c.name} is blinded for 1 turn.")
         if c.pk != a.pk:
             c.save()
 
     a.save()
     if (side := winner(encounter)):
-        _log(encounter, f"Бой окончен. {WINNER_TEXT[side]}", Kind.DOWN)
+        _log(encounter, f"The fight is over. {WINNER_TEXT[side]}", Kind.DOWN)
 
 
-# --- нетраннинг ------------------------------------------------------------------------
+# --- netrunning --------------------------------------------------------------------------------
 
 @transaction.atomic
 def quickhack(encounter, a, t, hack, rng, *, luck=0):
     _require_turn(encounter, a, action=True)
     if not a.deck:
-        raise CombatError(f"У {a.name} нет кибердеки.")
+        raise CombatError(f"{a.name} has no cyberdeck.")
     if not a.implants_on:
-        raise CombatError("Импланты отключены — дека не работает.")
+        raise CombatError("Implants are off, the deck doesn't work.")
     if hack not in rules.QUICKHACKS:
-        raise CombatError("Неизвестный квикхак.")
+        raise CombatError("Unknown quickhack.")
     if t.pk == a.pk or t.is_dead:
-        raise CombatError("Выберите живую цель.")
+        raise CombatError("Pick a living target.")
 
     name, cost = rules.QUICKHACKS[hack]
     discounts = []
-    if a.role == Combatant.Role.NETRUNNER and not a.memory.get("nr_discount"):
+    netrunner_discount = a.role == Combatant.Role.NETRUNNER and not a.memory.get("nr_discount")
+    raven_discount = a.deck == "raven" and not a.memory.get("raven")
+    if netrunner_discount:
         cost -= 1
-        discounts.append("нетраннер −1")
-    if a.deck == "raven" and not a.memory.get("raven"):
+        discounts.append("netrunner −1")
+    if raven_discount:
         cost -= 2
         discounts.append("Raven −2")
     cost = max(1, cost)
     if a.ram < cost:
-        raise CombatError(f"«{name}» стоит {cost} RAM, у {a.name} {a.ram}.")
+        raise CombatError(f"{name} costs {cost} RAM, {a.name} has {a.ram}.")
 
-    # §11: RAM уходит при попытке, даже если взлом не прошёл.
+    # §11: RAM is spent on the attempt, even if the hack fails.
     a.ram -= cost
-    if "нетраннер −1" in discounts:
+    if netrunner_discount:
         a.memory["nr_discount"] = True
-    if "Raven −2" in discounts:
+    if raven_discount:
         a.memory["raven"] = True
     a.has_acted = True
 
@@ -779,55 +781,55 @@ def quickhack(encounter, a, t, hack, rng, *, luck=0):
     state_mods, _ = _check_mods(a, attack=False)
     roll = rules.roll_check(a.intel, mods + state_mods, rng)
     price = f"{cost} RAM" + (f", {', '.join(discounts)}" if discounts else "")
-    head = f"{a.name}: «{name}» на {t.name} ({price}), INT {roll.describe()} против DV {dv}"
+    head = f"{a.name}: {name} on {t.name} ({price}), INT {roll.describe()} against DV {dv}"
 
     if roll.total < dv:
-        _log(encounter, head + " — взлом не прошёл.", Kind.MISS)
+        _log(encounter, head + ", the hack fails.", Kind.MISS)
         a.save()
         return
 
-    _log(encounter, head + " — успех.", Kind.HIT)
+    _log(encounter, head + ", success.", Kind.HIT)
     if hack == "ping":
-        _log(encounter, "Ping: ведущий показывает подключённые устройства и цели в сети.")
+        _log(encounter, "Ping: the GM reveals connected devices and targets on the network.")
     elif hack == "glitch":
         _add_status(t, "glitch", 1)
-        _log(encounter, f"{t.name} не может пользоваться оружием 1 ход.")
+        _log(encounter, f"{t.name} can't use their weapon for 1 turn.")
     elif hack == "optics":
         _add_status(t, "blind", 1)
-        _log(encounter, f"{t.name} ослеплён 1 ход.")
+        _log(encounter, f"{t.name} is blinded for 1 turn.")
     elif hack == "cripple":
         _add_status(t, "immobile", 1)
-        _log(encounter, f"{t.name} не сможет двигаться в следующий ход.")
+        _log(encounter, f"{t.name} can't move next turn.")
     else:
         dice = 3 if hack == "short" else 2
         if a.deck == "militech" and not a.memory.get("militech"):
             a.memory["militech"] = True
             dice += 1
-            _log(encounter, "Militech: +1d6 к первому атакующему квикхаку.")
+            _log(encounter, "Militech: +1d6 to the first attacking quickhack.")
         _flat_damage(encounter, t, rng, name, dice=dice, ignore_armor=True,
-                     sp_note=" (обычная броня не защищает)")
+                     sp_note=" (regular armour doesn't protect)")
         if hack == "overheat":
             _add_status(t, "overheat", None, dice=2)
-            _log(encounter, f"В начале следующего хода {t.name} получит ещё 2d6.")
+            _log(encounter, f"At the start of their next turn {t.name} takes another 2d6.")
 
     t.save()
     a.save()
     if (side := winner(encounter)):
-        _log(encounter, f"Бой окончен. {WINNER_TEXT[side]}", Kind.DOWN)
+        _log(encounter, f"The fight is over. {WINNER_TEXT[side]}", Kind.DOWN)
 
 
 @transaction.atomic
 def drain_ram(encounter, a, t):
-    """§11: 1 действие у выведенного из строя кибернизированного врага."""
+    """§11: 1 action next to a downed cyberized enemy."""
     _require_turn(encounter, a, action=True)
     if not a.deck:
-        raise CombatError(f"У {a.name} нет кибердеки.")
+        raise CombatError(f"{a.name} has no cyberdeck.")
     if _metres(a, t) > rules.SQUARE_M:
-        raise CombatError("Нужно стоять вплотную к телу.")
+        raise CombatError("You need to stand right next to the body.")
     if t.conscious or not t.cyberized:
-        raise CombatError("RAM снимают только с выведенного из строя кибернизированного врага.")
+        raise CombatError("RAM can only be taken from a downed cyberized enemy.")
     if t.memory.get("drained"):
-        raise CombatError(f"С {t.name} RAM уже сняли.")
+        raise CombatError(f"{t.name}'s RAM has already been taken.")
     gain = 4 if (t.deck and t.tier != Combatant.Tier.REGULAR) else 3
     before = a.ram
     a.ram = min(a.ram_max, a.ram + gain)
@@ -835,15 +837,15 @@ def drain_ram(encounter, a, t):
     t.memory["drained"] = True
     a.save()
     t.save()
-    _log(encounter, f"{a.name} снимает RAM с {t.name}: +{a.ram - before} (теперь {a.ram}/{a.ram_max}).")
+    _log(encounter, f"{a.name} takes RAM from {t.name}: +{a.ram - before} (now {a.ram}/{a.ram_max}).")
 
 
-# --- прочие действия --------------------------------------------------------------------
+# --- other actions -----------------------------------------------------------------------------
 
 def _gun(c: Combatant):
     weapon = c.get_weapon()
     if weapon.is_melee:
-        raise CombatError(f"{weapon.name} — холодное оружие.")
+        raise CombatError(f"{weapon.name} is a melee weapon.")
     return weapon
 
 
@@ -852,22 +854,22 @@ def reload(encounter, c):
     _require_turn(encounter, c, action=True)
     gun = _gun(c)
     if c.ammo >= c.mag_size:
-        raise CombatError("Магазин и так полный.")
+        raise CombatError("The magazine is already full.")
     c.ammo = c.mag_size
     c.has_acted = True
     c.save()
-    _log(encounter, f"{c.name} перезаряжает {gun.name} ({c.ammo}).")
+    _log(encounter, f"{c.name} reloads the {gun.name} ({c.ammo}).")
 
 
 @transaction.atomic
 def unjam(encounter, c):
     _require_turn(encounter, c, action=True)
     if not c.jammed:
-        raise CombatError("Оружие не заклинило.")
+        raise CombatError("The weapon is not jammed.")
     c.jammed = False
     c.has_acted = True
     c.save()
-    _log(encounter, f"{c.name} устраняет заклинивание.")
+    _log(encounter, f"{c.name} clears the jam.")
 
 
 @transaction.atomic
@@ -875,13 +877,13 @@ def charge(encounter, c):
     _require_turn(encounter, c, action=True)
     gun = _gun(c)
     if gun.kind != "tech":
-        raise CombatError(f"{gun.name} — не TECH-оружие.")
+        raise CombatError(f"{gun.name} is not a TECH weapon.")
     if c.charged:
-        raise CombatError("Уже заряжено, несколько зарядок не копятся.")
+        raise CombatError("Already charged; charges don't stack.")
     c.charged = True
     c.has_acted = True
     c.save()
-    _log(encounter, f"{c.name} заряжает {gun.name}. Выстрел — следующим действием.")
+    _log(encounter, f"{c.name} charges the {gun.name}. The shot comes with the next action.")
 
 
 @transaction.atomic
@@ -889,20 +891,20 @@ def lock(encounter, c, t):
     _require_turn(encounter, c, action=True)
     gun = _gun(c)
     if gun.kind != "smart":
-        raise CombatError(f"{gun.name} — не Smart-оружие.")
+        raise CombatError(f"{gun.name} is not a Smart weapon.")
     if t.pk == c.pk or t.is_dead:
-        raise CombatError("Выберите другую цель.")
+        raise CombatError("Pick another target.")
     c.lock_target = t
     c.lock_ready = False
     c.has_acted = True
     c.save()
-    _log(encounter, f"{c.name} берёт {t.name} в захват. Со следующего хода прицельные "
-                    "выстрелы по нему без −3.")
+    _log(encounter, f"{c.name} locks on to {t.name}. From next turn, aimed shots at them "
+                    "have no −3 penalty.")
 
 
 def _near(a: Combatant, t: Combatant) -> None:
     if t.pk != a.pk and _metres(a, t) > rules.SQUARE_M:
-        raise CombatError(f"{t.name} слишком далеко, нужно стоять рядом.")
+        raise CombatError(f"{t.name} is too far away, you need to stand next to them.")
 
 
 @transaction.atomic
@@ -912,13 +914,13 @@ def medkit(encounter, a, t, rng):
     if t.pk == a.pk:
         t = a
     if a.medkits < 1:
-        raise CombatError(f"У {a.name} нет аптечек.")
+        raise CombatError(f"{a.name} has no medkits.")
     if t.is_dead:
-        raise CombatError(f"{t.name} мёртв.")
+        raise CombatError(f"{t.name} is dead.")
     if t.medkits_received >= rules.MEDKIT_LIMIT:
-        raise CombatError(f"На {t.name} уже ушло две аптечки за бой.")
+        raise CombatError(f"{t.name} has already had two medkits this fight.")
     if t.hp >= t.hp_max and "bleeding" not in t.statuses:
-        raise CombatError(f"{t.name} не ранен.")
+        raise CombatError(f"{t.name} is not hurt.")
 
     rolled = rules.roll_d6(2, rng)
     before = t.hp
@@ -926,12 +928,12 @@ def medkit(encounter, a, t, rng):
     t.medkits_received += 1
     a.medkits -= 1
     a.has_acted = True
-    text = f"{a.name} применяет аптечку на {t.name}: 2d6{rolled} → {before}→{t.hp} HP."
+    text = f"{a.name} uses a medkit on {t.name}: 2d6{rolled} → {before}→{t.hp} HP."
     if t.statuses.pop("bleeding", None):
-        text += " Кровотечение остановлено."
+        text += " Bleeding stopped."
     if before <= 0 < t.hp:
         t.stabilized = False
-        text += f" {t.name} приходит в себя."
+        text += f" {t.name} comes round."
     t.save()
     if t is not a:
         a.save()
@@ -943,16 +945,16 @@ def stabilize(encounter, a, t, rng):
     _require_turn(encounter, a, action=True)
     _near(a, t)
     if t.pk == a.pk or t.hp > 0 or t.is_dead or t.stabilized:
-        raise CombatError("Стабилизировать можно только союзника без сознания.")
+        raise CombatError("You can only stabilise an unconscious ally.")
     mods, _ = _check_mods(a, attack=False)
     roll = rules.roll_check(a.tech, mods, rng)
     a.has_acted = True
     if roll.total >= rules.BASE_DV:
         t.stabilized = True
-        _log(encounter, f"{a.name} стабилизирует {t.name}: TECH {roll.describe()}. "
-                        "Проверок смерти больше нет, HP остаётся 0.")
+        _log(encounter, f"{a.name} stabilises {t.name}: TECH {roll.describe()}. "
+                        "No more death checks, HP stays at 0.")
     else:
-        _log(encounter, f"{a.name} пытается стабилизировать {t.name}: TECH {roll.describe()} — не вышло.",
+        _log(encounter, f"{a.name} tries to stabilise {t.name}: TECH {roll.describe()}, no luck.",
              Kind.MISS)
     t.save()
     a.save()
@@ -964,15 +966,15 @@ def stop_bleeding(encounter, a, t, rng):
     _near(a, t)
     target = a if t.pk == a.pk else t
     if "bleeding" not in target.statuses:
-        raise CombatError(f"У {target.name} нет кровотечения.")
+        raise CombatError(f"{target.name} is not bleeding.")
     mods, _ = _check_mods(a, attack=False)
     roll = rules.roll_check(a.tech, mods, rng)
     a.has_acted = True
     if roll.total >= rules.BASE_DV:
         target.statuses.pop("bleeding")
-        _log(encounter, f"{a.name} останавливает кровотечение у {target.name}: TECH {roll.describe()}.")
+        _log(encounter, f"{a.name} stops {target.name}'s bleeding: TECH {roll.describe()}.")
     else:
-        _log(encounter, f"{a.name} не смог остановить кровотечение: TECH {roll.describe()}.", Kind.MISS)
+        _log(encounter, f"{a.name} can't stop the bleeding: TECH {roll.describe()}.", Kind.MISS)
     if target is not a:
         target.save()
     a.save()
@@ -980,20 +982,20 @@ def stop_bleeding(encounter, a, t, rng):
 
 @transaction.atomic
 def set_cover(encounter, c, cover):
-    """Инструмент ведущего: укрытие меняют в любой момент, действие не тратится."""
+    """GM tool: cover can change at any time and costs no action."""
     if cover not in Combatant.Cover.values:
-        raise CombatError("Неизвестное укрытие.")
+        raise CombatError("Unknown cover.")
     c.cover = cover
     c.save(update_fields=["cover"])
     label = dict(Combatant.Cover.choices)[cover].lower()
-    _log(encounter, f"Укрытие {c.name}: {label}.")
+    _log(encounter, f"{c.name}'s cover: {label}.")
 
 
 @transaction.atomic
 def toggle_walls(encounter: Encounter, cells: list, build: bool) -> None:
     """
-    Инструмент ведущего: поставить или снять стены. Работает и во время боя,
-    действие не тратится. Клетку, где кто-то стоит, застроить нельзя.
+    GM tool: add or remove walls. Works during a fight too and costs no
+    action. A square where someone stands can't become a wall.
     """
     walls = encounter.wall_set
     taken = {(c.x, c.y) for c in encounter.combatants.filter(is_dead=False)}
@@ -1001,7 +1003,7 @@ def toggle_walls(encounter: Encounter, cells: list, build: bool) -> None:
         try:
             x, y = int(raw[0]), int(raw[1])
         except (TypeError, ValueError, IndexError):
-            raise CombatError("Неверная клетка.") from None
+            raise CombatError("Invalid square.") from None
         if not (0 <= x < encounter.width and 0 <= y < encounter.height):
             continue
         if build and (x, y) not in taken:
@@ -1021,9 +1023,9 @@ def clear_walls(encounter: Encounter) -> None:
 @transaction.atomic
 def reset(encounter: Encounter) -> None:
     """
-    Назад к расстановке. §5: после боя возвращается половина потерянного SP
-    (вверх). Аптечки, гранаты и удача не возвращаются — это расходники и
-    запас на сессию; их правят в карточке бойца.
+    Back to setup. §5: after a fight half of the lost SP comes back (rounded
+    up). Medkits, grenades and luck don't come back: they are consumables and
+    a per-session pool; edit them on the fighter sheet.
     """
     encounter.round = 0
     encounter.turn_index = 0
@@ -1046,14 +1048,14 @@ def reset(encounter: Encounter) -> None:
     encounter.log.all().delete()
 
 
-# --- состояние для карты ---------------------------------------------------------------
+# --- state for the map --------------------------------------------------------------------------
 
 def _status_list(c: Combatant) -> list[str]:
     names = []
     for key, data in c.statuses.items():
         label = STATUS_NAMES.get(key, key)
         if data.get("left"):
-            label += f" ({data['left']} х.)"
+            label += f" ({data['left']} t.)"
         names.append(label)
     return names
 

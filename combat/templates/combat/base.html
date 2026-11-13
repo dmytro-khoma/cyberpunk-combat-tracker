@@ -1,18 +1,18 @@
 {% load static %}<!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Трекер боя · Киберпанк НРИ{% endblock %}</title>
-    <meta name="description" content="Трекер боя для Cyberpunk НРИ 1.0: инициатива, дистанция, укрытия, SP, крит. травмы, гранаты и квикхаки по правилам.">
+    <title>{% block title %}Combat tracker · Cyberpunk TTRPG{% endblock %}</title>
+    <meta name="description" content="Combat tracker for the Cyberpunk TTRPG 1.0 rules: initiative, range, cover, SP, critical injuries, grenades and quickhacks.">
     <link rel="stylesheet" href="{% static 'combat/css/app.css' %}">
     {% block head %}{% endblock %}
 </head>
 <body>
-    <a class="skip-link" href="#main">К содержимому</a>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="runner">
-        <a href="{% url 'combat:list' %}">Киберпанк<b>/</b>трекер боя</a>
-        <span>правила НРИ 1.0</span>
+        <a href="{% url 'combat:list' %}">Cyberpunk<b>/</b>combat tracker</a>
+        <span>TTRPG rules 1.0</span>
     </header>
 
     <main id="main" class="page">

@@ -6,7 +6,7 @@ from . import rules
 
 
 def stat_field(default: int, verbose: str) -> models.PositiveSmallIntegerField:
-    # §1: на создании 2–8, после бонусов максимум 10.
+    # §1: 2–8 at creation, 10 at most after bonuses.
     return models.PositiveSmallIntegerField(
         verbose, default=default, validators=[MinValueValidator(2), MaxValueValidator(10)]
     )
@@ -19,15 +19,15 @@ def count_field(verbose: str, default: int = 0, high: int = 20) -> models.Positi
 
 
 class Encounter(models.Model):
-    name = models.CharField("Название", max_length=80)
+    name = models.CharField("Name", max_length=80)
     width = models.PositiveSmallIntegerField(
-        "Ширина", default=16, validators=[MinValueValidator(6), MaxValueValidator(30)]
+        "Width", default=16, validators=[MinValueValidator(6), MaxValueValidator(30)]
     )
     height = models.PositiveSmallIntegerField(
-        "Высота", default=10, validators=[MinValueValidator(6), MaxValueValidator(30)]
+        "Height", default=10, validators=[MinValueValidator(6), MaxValueValidator(30)]
     )
     walls = models.JSONField(default=list, blank=True)   # [[x, y], ...]
-    round = models.PositiveIntegerField(default=0)       # 0 — бой не начат
+    round = models.PositiveIntegerField(default=0)       # 0 = the fight has not started
     turn_index = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -60,36 +60,36 @@ class Encounter(models.Model):
 
 class Combatant(models.Model):
     class Side(models.TextChoices):
-        CREW = "crew", "Команда"
-        HOSTILE = "hostile", "Противники"
+        CREW = "crew", "Crew"
+        HOSTILE = "hostile", "Hostiles"
 
     class Tier(models.TextChoices):
-        REGULAR = "regular", "Обычный"
-        ELITE = "elite", "Элита"
-        BOSS = "boss", "Босс"
+        REGULAR = "regular", "Regular"
+        ELITE = "elite", "Elite"
+        BOSS = "boss", "Boss"
 
     class Role(models.TextChoices):
-        NONE = "", "Без класса"
-        GUNNER = "gunner", "Стрелок"
-        ASSASSIN = "assassin", "Хладнокровный убийца"
-        NETRUNNER = "netrunner", "Нетраннер"
+        NONE = "", "No class"
+        GUNNER = "gunner", "Gunner"
+        ASSASSIN = "assassin", "Cold-blooded killer"
+        NETRUNNER = "netrunner", "Netrunner"
 
     class Cover(models.TextChoices):
-        NONE = "", "Нет"
-        PARTIAL = "partial", "Частичное"
-        FULL = "full", "Полное"
+        NONE = "", "None"
+        PARTIAL = "partial", "Partial"
+        FULL = "full", "Full"
 
     encounter = models.ForeignKey(Encounter, on_delete=models.CASCADE, related_name="combatants")
-    name = models.CharField("Имя", max_length=40)
-    side = models.CharField("Сторона", max_length=10, choices=Side.choices, default=Side.CREW)
-    tier = models.CharField("Уровень", max_length=10, choices=Tier.choices, default=Tier.REGULAR)
-    role = models.CharField("Класс", max_length=10, choices=Role.choices, blank=True, default="")
+    name = models.CharField("Name", max_length=40)
+    side = models.CharField("Side", max_length=10, choices=Side.choices, default=Side.CREW)
+    tier = models.CharField("Tier", max_length=10, choices=Tier.choices, default=Tier.REGULAR)
+    role = models.CharField("Class", max_length=10, choices=Role.choices, blank=True, default="")
     gunner_category = models.CharField(
-        "Категория стрелка", max_length=10, choices=rules.CATEGORY_CHOICES, blank=True, default="",
-        help_text="Только для Стрелка: +2 к попаданию из этой категории.",
+        "Gunner category", max_length=10, choices=rules.CATEGORY_CHOICES, blank=True, default="",
+        help_text="Gunner only: +2 to hit with this category.",
     )
 
-    # §1. Характеристики
+    # §1. Stats
     intel = stat_field(5, "INT")
     ref = stat_field(5, "REF")
     dex = stat_field(5, "DEX")
@@ -98,37 +98,37 @@ class Combatant(models.Model):
     body = stat_field(5, "BODY")
     luck = stat_field(5, "LUCK")
 
-    # §15. Пассивные импланты, которые трекер считает сам
-    subdermal = models.BooleanField("Подкожная броня (+2 SP)", default=False)
-    skull = models.BooleanField("Бронированный череп (+3 SP головы)", default=False)
-    bioplastic = models.BooleanField("Биопластиковые сосуды (+10 HP)", default=False)
-    optics = models.BooleanField("Улучшенная оптика (прицел −1)", default=False)
-    reflexes = models.BooleanField("Усиленные рефлексы (+1 REF)", default=False)
-    adrenaline = models.BooleanField("Адреналиновый ускоритель", default=False)
-    cyberized = models.BooleanField("Кибернизирован", default=True,
-                                    help_text="Нужно для ЭМИ и сбора RAM с тела.")
-    deck = models.CharField("Кибердека", max_length=10, choices=rules.DECK_CHOICES,
+    # §15. Passive implants the tracker applies by itself
+    subdermal = models.BooleanField("Subdermal armour (+2 SP)", default=False)
+    skull = models.BooleanField("Armoured skull (+3 head SP)", default=False)
+    bioplastic = models.BooleanField("Bioplastic blood vessels (+10 HP)", default=False)
+    optics = models.BooleanField("Enhanced optics (aim −1)", default=False)
+    reflexes = models.BooleanField("Boosted reflexes (+1 REF)", default=False)
+    adrenaline = models.BooleanField("Adrenaline booster", default=False)
+    cyberized = models.BooleanField("Cyberized", default=True,
+                                    help_text="Needed for EMP and for taking RAM from a body.")
+    deck = models.CharField("Cyberdeck", max_length=10, choices=rules.DECK_CHOICES,
                             blank=True, default="")
 
-    # Снаряжение
-    weapon = models.CharField("Оружие", max_length=20, choices=rules.WEAPON_CHOICES, default="unity")
-    magazine = count_field("Магазин", 0, 99)
-    overclock_dv = models.PositiveSmallIntegerField("DV разгона", null=True, blank=True,
+    # Gear
+    weapon = models.CharField("Weapon", max_length=20, choices=rules.WEAPON_CHOICES, default="unity")
+    magazine = count_field("Magazine", 0, 99)
+    overclock_dv = models.PositiveSmallIntegerField("Overclock DV", null=True, blank=True,
                                                     validators=[MaxValueValidator(30)])
-    armor_sp = count_field("SP брони", rules.ARMOR_BASE_SP, 20)
+    armor_sp = count_field("Armour SP", rules.ARMOR_BASE_SP, 20)
     armor_sp_max = models.PositiveSmallIntegerField(default=rules.ARMOR_BASE_SP)
     hp_override = models.PositiveSmallIntegerField(
-        "Макс. HP вручную", null=True, blank=True, validators=[MaxValueValidator(300)],
-        help_text="Пусто — по формуле. Шаблоны врагов: слабый 20, обычный 30, элита 45.",
+        "Max HP (manual)", null=True, blank=True, validators=[MaxValueValidator(300)],
+        help_text="Leave empty to use the formula. Enemy templates: weak 20, regular 30, elite 45.",
     )
-    medkits = count_field("Аптечки", 2)
-    frag = count_field("Осколочные", 0)
-    emp = count_field("ЭМИ", 0)
-    flash = count_field("Светошумовые", 0)
-    fire = count_field("Зажигательные", 0)
-    cover = models.CharField("Укрытие", max_length=10, choices=Cover.choices, blank=True, default="")
+    medkits = count_field("Medkits", 2)
+    frag = count_field("Frag grenades", 0)
+    emp = count_field("EMP grenades", 0)
+    flash = count_field("Flashbangs", 0)
+    fire = count_field("Incendiary grenades", 0)
+    cover = models.CharField("Cover", max_length=10, choices=Cover.choices, blank=True, default="")
 
-    # Состояние в бою
+    # Combat state
     hp_max = models.PositiveSmallIntegerField(default=0)
     hp = models.SmallIntegerField(default=0)
     is_dead = models.BooleanField(default=False)
@@ -144,13 +144,13 @@ class Combatant(models.Model):
     medkits_received = models.PositiveSmallIntegerField(default=0)
     dodge_used = models.BooleanField(default=False)
     statuses = models.JSONField(default=dict, blank=True)
-    memory = models.JSONField(default=dict, blank=True)   # разовые эффекты за бой/ход
+    memory = models.JSONField(default=dict, blank=True)   # one-off effects per fight / turn
 
-    x = models.PositiveSmallIntegerField("Столбец", default=0)
-    y = models.PositiveSmallIntegerField("Ряд", default=0)
+    x = models.PositiveSmallIntegerField("Column", default=0)
+    y = models.PositiveSmallIntegerField("Row", default=0)
     initiative = models.SmallIntegerField(null=True, blank=True)
     init_roll = models.PositiveSmallIntegerField(null=True, blank=True)
-    move_left = models.PositiveSmallIntegerField(default=0)    # метры
+    move_left = models.PositiveSmallIntegerField(default=0)    # metres
     moved_m = models.PositiveSmallIntegerField(default=0)
     has_acted = models.BooleanField(default=False)
 
@@ -161,7 +161,7 @@ class Combatant(models.Model):
         return self.name
 
     def refill(self) -> None:
-        """Полные HP, магазин и RAM. Вызывается при создании и правке."""
+        """Full HP, magazine and RAM. Called on create and on edit."""
         self.hp_max = self.hp_override or (
             rules.max_hp(self.body, self.cool) + (10 if self.bioplastic else 0)
         )
@@ -169,7 +169,7 @@ class Combatant(models.Model):
         self.ammo = self.mag_size
         self.ram = self.ram_max
 
-    # --- производные значения -------------------------------------------
+    # --- derived values -----------------------------------------------------
 
     def get_weapon(self):
         return rules.WEAPONS[self.weapon]
@@ -228,10 +228,10 @@ class Combatant(models.Model):
 
 class LogEntry(models.Model):
     class Kind(models.TextChoices):
-        INFO = "info", "Инфо"
-        HIT = "hit", "Попадание"
-        MISS = "miss", "Промах"
-        DOWN = "down", "Выбыл"
+        INFO = "info", "Info"
+        HIT = "hit", "Hit"
+        MISS = "miss", "Miss"
+        DOWN = "down", "Down"
 
     encounter = models.ForeignKey(Encounter, on_delete=models.CASCADE, related_name="log")
     round = models.PositiveIntegerField(default=0)

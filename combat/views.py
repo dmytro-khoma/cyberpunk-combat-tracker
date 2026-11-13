@@ -10,7 +10,7 @@ from . import services
 from .forms import CombatantForm, EncounterForm
 from .models import Combatant, Encounter
 
-# Настоящие кубики. Тесты передают в services свой генератор.
+# Real dice. Tests pass their own generator to services.
 DICE = random.SystemRandom()
 
 
@@ -19,7 +19,7 @@ def encounter_list(request: HttpRequest) -> HttpResponse:
     form = EncounterForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         encounter = form.save()
-        messages.success(request, "Сцена создана. Добавьте бойцов.")
+        messages.success(request, "Scene created. Now add the fighters.")
         return redirect("combat:combatant_add", pk=encounter.pk)
 
     return render(request, "combat/encounter_list.html", {
@@ -41,7 +41,7 @@ def encounter_detail(request: HttpRequest, pk: int) -> HttpResponse:
 def encounter_delete(request: HttpRequest, pk: int) -> HttpResponse:
     encounter = get_object_or_404(Encounter, pk=pk)
     encounter.delete()
-    messages.success(request, f"Сцена «{encounter.name}» удалена.")
+    messages.success(request, f"Scene \"{encounter.name}\" deleted.")
     return redirect("combat:list")
 
 
@@ -52,7 +52,7 @@ def combatant_form(request: HttpRequest, pk: int, combatant_pk: int | None = Non
         get_object_or_404(Combatant, pk=combatant_pk, encounter=encounter) if combatant_pk else None
     )
     if encounter.started:
-        messages.error(request, "Бойцов меняют до начала боя. Сначала сбросьте бой.")
+        messages.error(request, "Fighters can only be changed before the fight. Reset the fight first.")
         return redirect(encounter)
 
     form = CombatantForm(request.POST or None, instance=combatant, encounter=encounter)
@@ -63,7 +63,7 @@ def combatant_form(request: HttpRequest, pk: int, combatant_pk: int | None = Non
         fighter.luck_left = fighter.luck
         fighter.refill()
         fighter.save()
-        messages.success(request, f"{fighter.name} сохранён.")
+        messages.success(request, f"{fighter.name} saved.")
         if "add_another" in request.POST:
             return redirect("combat:combatant_add", pk=encounter.pk)
         return redirect(encounter)
@@ -80,18 +80,18 @@ def combatant_delete(request: HttpRequest, pk: int, combatant_pk: int) -> HttpRe
     encounter = get_object_or_404(Encounter, pk=pk)
     combatant = get_object_or_404(Combatant, pk=combatant_pk, encounter=encounter)
     if encounter.started:
-        messages.error(request, "Во время боя бойцов не убирают. Сначала сбросьте бой.")
+        messages.error(request, "Fighters can't be removed during a fight. Reset the fight first.")
     else:
         combatant.delete()
-        messages.success(request, f"{combatant.name} убран из сцены.")
+        messages.success(request, f"{combatant.name} removed from the scene.")
     return redirect(encounter)
 
 
 @require_POST
 def action(request: HttpRequest, pk: int) -> JsonResponse:
     """
-    JSON для карты. Тело: {"type": ..., "actor": id, "target": id, "x", "y", ...}.
-    Ответ — новое состояние сцены или {"error": "..."} с кодом 400.
+    JSON endpoint for the map. Body: {"type": ..., "actor": id, "target": id, "x", "y", ...}.
+    Returns the new scene state, or {"error": "..."} with status 400.
     """
     encounter = get_object_or_404(Encounter, pk=pk)
 
@@ -100,19 +100,19 @@ def action(request: HttpRequest, pk: int) -> JsonResponse:
         if not isinstance(data, dict):
             raise ValueError
     except ValueError:
-        return JsonResponse({"error": "Ожидался JSON-объект."}, status=400)
+        return JsonResponse({"error": "Expected a JSON object."}, status=400)
 
     def fighter(key: str) -> Combatant:
         try:
             return encounter.combatants.get(pk=int(data.get(key)))
         except (TypeError, ValueError, Combatant.DoesNotExist):
-            raise services.CombatError("Нет такого бойца.") from None
+            raise services.CombatError("No such fighter.") from None
 
     def number(key: str, default: int | None = None) -> int:
         try:
             return int(data.get(key, default))
         except (TypeError, ValueError):
-            raise services.CombatError("Неверное число в запросе.") from None
+            raise services.CombatError("Invalid number in the request.") from None
 
     kind = data.get("type")
     try:
@@ -155,16 +155,16 @@ def action(request: HttpRequest, pk: int) -> JsonResponse:
         elif kind == "walls":
             cells = data.get("cells")
             if not isinstance(cells, list):
-                raise services.CombatError("Ожидался список клеток.")
+                raise services.CombatError("Expected a list of squares.")
             services.toggle_walls(encounter, cells, bool(data.get("build")))
         elif kind == "clear_walls":
             services.clear_walls(encounter)
         elif kind == "cover":
             services.set_cover(encounter, fighter("target"), str(data.get("cover") or ""))
         else:
-            return JsonResponse({"error": "Неизвестное действие."}, status=400)
+            return JsonResponse({"error": "Unknown action."}, status=400)
     except services.CombatError as error:
         return JsonResponse({"error": str(error)}, status=400)
 
     encounter.refresh_from_db()
-    return JsonResponse(services.state(encounter))   # fx (место взрыва) переживает refresh
+    return JsonResponse(services.state(encounter))   # fx (blast position) survives the refresh
