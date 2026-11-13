@@ -1,0 +1,30 @@
+{% load static %}<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Трекер боя · Киберпанк НРИ{% endblock %}</title>
+    <meta name="description" content="Трекер боя для Cyberpunk НРИ 1.0: инициатива, дистанция, укрытия, SP, крит. травмы, гранаты и квикхаки по правилам.">
+    <link rel="stylesheet" href="{% static 'combat/css/app.css' %}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <a class="skip-link" href="#main">К содержимому</a>
+    <header class="runner">
+        <a href="{% url 'combat:list' %}">Киберпанк<b>/</b>трекер боя</a>
+        <span>правила НРИ 1.0</span>
+    </header>
+
+    <main id="main" class="page">
+        {% if messages %}
+            <ul class="messages" role="status">
+                {% for message in messages %}
+                    <li class="message message--{{ message.tags }}">{{ message }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

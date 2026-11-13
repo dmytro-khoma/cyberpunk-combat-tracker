@@ -1,0 +1,83 @@
+{% extends "combat/base.html" %}
+
+{% block title %}{% if combatant %}{{ combatant.name }}{% else %}Новый боец{% endif %} · Трекер боя{% endblock %}
+
+{% block content %}
+<div>
+    <p class="small"><a href="{{ encounter.get_absolute_url }}">← {{ encounter.name }}</a></p>
+    <h1>{% if combatant %}{{ combatant.name }}{% else %}Новый боец{% endif %}</h1>
+</div>
+
+<form method="post" class="form sheet" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+        <div class="message message--error" role="alert">{{ form.non_field_errors|join:" " }}</div>
+    {% endif %}
+
+    <fieldset class="group">
+        <legend>Кто</legend>
+        <div class="grid">
+            {% include "combat/_field.html" with field=form.name %}
+            {% include "combat/_field.html" with field=form.side %}
+            {% include "combat/_field.html" with field=form.tier %}
+            {% include "combat/_field.html" with field=form.role %}
+            {% include "combat/_field.html" with field=form.gunner_category %}
+        </div>
+    </fieldset>
+
+    <fieldset class="group">
+        <legend>Характеристики</legend>
+        <div class="grid grid--stats">
+            {% for field in form.stat_fields %}{% include "combat/_field.html" with field=field %}{% endfor %}
+        </div>
+        <p class="footnote" style="margin-top: 0.6rem">На создании 35 очков, каждая 2–8 до бонусов происхождения и имплантов, после — не выше 10. HP = 10 + 5 × ⌈(BODY + COOL) / 2⌉.</p>
+    </fieldset>
+
+    <fieldset class="group">
+        <legend>Импланты</legend>
+        <div class="checks">
+            {% for field in form.implant_fields %}
+                <label class="check">{{ field }} {{ field.label }}</label>
+            {% endfor %}
+        </div>
+        <div class="grid" style="margin-top: 0.8rem">
+            {% include "combat/_field.html" with field=form.deck %}
+        </div>
+    </fieldset>
+
+    <fieldset class="group">
+        <legend>Снаряжение</legend>
+        <div class="grid">
+            {% include "combat/_field.html" with field=form.weapon %}
+            {% include "combat/_field.html" with field=form.magazine %}
+            {% include "combat/_field.html" with field=form.overclock_dv %}
+            {% include "combat/_field.html" with field=form.armor_sp %}
+            {% include "combat/_field.html" with field=form.hp_override %}
+        </div>
+        <div class="grid grid--stats" style="margin-top: 0.8rem">
+            {% include "combat/_field.html" with field=form.medkits %}
+            {% include "combat/_field.html" with field=form.frag %}
+            {% include "combat/_field.html" with field=form.emp %}
+            {% include "combat/_field.html" with field=form.flash %}
+            {% include "combat/_field.html" with field=form.fire %}
+        </div>
+    </fieldset>
+
+    <fieldset class="group">
+        <legend>Место на карте</legend>
+        <div class="grid">
+            {% include "combat/_field.html" with field=form.x %}
+            {% include "combat/_field.html" with field=form.y %}
+            {% include "combat/_field.html" with field=form.cover %}
+        </div>
+        <p class="footnote" style="margin-top: 0.6rem">Карта {{ encounter.width }}×{{ encounter.height }}, клетка 0,0 — левый верхний угол.</p>
+    </fieldset>
+
+    <div class="row">
+        <button class="btn btn--solid" type="submit">Сохранить</button>
+        {% if not combatant %}
+            <button class="btn" type="submit" name="add_another" value="1">Сохранить и добавить ещё</button>
+        {% endif %}
+    </div>
+</form>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "combat/base.html" %}
+
+{% block content %}
+<div class="cols">
+    <section aria-labelledby="list-title">
+        <h1 id="list-title">Сцены</h1>
+        <p class="muted" style="margin-block: 0.4rem 1.2rem">Ведущий расставляет бойцов, трекер бросает кубики и считает SP, дистанцию, укрытия и травмы.</p>
+        {% if encounters %}
+            <ul class="scenes" role="list">
+                {% for encounter in encounters %}
+                    <li>
+                        <a href="{{ encounter.get_absolute_url }}">{{ encounter.name }}</a>
+                        <span class="muted small">
+                            {{ encounter.width }}×{{ encounter.height }} ·
+                            {{ encounter.combatants.count }} бойц. ·
+                            {% if encounter.started %}раунд {{ encounter.round }}{% else %}расстановка{% endif %}
+                        </span>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="muted">Сцен пока нет. Создайте свою или запустите <code>python manage.py seed_demo</code>.</p>
+        {% endif %}
+    </section>
+
+    <section class="sheet" aria-labelledby="new-title">
+        <h2 id="new-title"><span class="num">+</span>Новая сцена</h2>
+        <form method="post" class="form" novalidate>
+            {% csrf_token %}
+            {% include "combat/_fields.html" with form=form %}
+            <div><button class="btn btn--solid" type="submit">Создать</button></div>
+        </form>
+    </section>
+</div>
+{% endblock %}

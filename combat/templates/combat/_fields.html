@@ -1,0 +1,6 @@
+{% if form.non_field_errors %}
+    <div class="message message--error" role="alert">{{ form.non_field_errors|join:" " }}</div>
+{% endif %}
+{% for field in form %}
+    {% include "combat/_field.html" with field=field %}
+{% endfor %}
