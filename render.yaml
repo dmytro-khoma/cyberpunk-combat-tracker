@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: cyberpunk-combat-tracker
+    runtime: python
+    plan: free
+    region: frankfurt
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    # The free plan has no persistent disk: every start begins with an empty
+    # SQLite database, so the demo scene is created again when it's missing.
+    startCommand: python manage.py migrate --noinput && python manage.py seed_demo --if-empty && gunicorn skirmish_site.wsgi --bind 0.0.0.0:$PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.5"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true

@@ -1,9 +1,10 @@
 ﻿"""
-Settings for Neon Skirmish.
+Settings for the combat tracker.
 
 Development defaults work out of the box. For a real deployment set the
 environment variables DJANGO_SECRET_KEY, DJANGO_DEBUG=0 and
-DJANGO_ALLOWED_HOSTS (comma-separated).
+DJANGO_ALLOWED_HOSTS (comma-separated). On Render the site's own host name
+is picked up automatically from RENDER_EXTERNAL_HOSTNAME.
 """
 
 import os
@@ -20,6 +21,12 @@ if not SECRET_KEY:
     raise RuntimeError("Set DJANGO_SECRET_KEY when DJANGO_DEBUG=0.")
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+CSRF_TRUSTED_ORIGINS = []
+
+render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if render_host:
+    ALLOWED_HOSTS.append(render_host)
+    CSRF_TRUSTED_ORIGINS.append(f"https://{render_host}")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -33,6 +40,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",   # serves /static/ in production
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -81,6 +89,14 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    # Hashed, compressed file names in production, so browsers can cache them for long.
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG
+        else "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -91,3 +107,8 @@ SESSION_COOKIE_SECURE = not DEBUG
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 
+if not DEBUG:
+    # The hosting proxy terminates HTTPS and says so in this header.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 365
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True

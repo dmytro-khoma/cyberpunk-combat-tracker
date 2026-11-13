@@ -36,7 +36,17 @@ HOSTILES = [
 class Command(BaseCommand):
     help = "Create a demo scene with seven fighters."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--if-empty", action="store_true",
+            help="Only create the scene when there are no scenes yet (used on deploy).",
+        )
+
     def handle(self, *args, **options):
+        if options["if_empty"] and Encounter.objects.exists():
+            self.stdout.write("Scenes already exist, nothing to do.")
+            return
+
         # Crates and pillars: some lines of fire are open, some are blocked.
         walls = [[7, 1], [7, 2], [4, 4], [10, 4], [11, 4], [5, 8], [6, 8],
                  [9, 8], [9, 9], [12, 0], [13, 0]]
